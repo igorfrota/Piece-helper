@@ -1,0 +1,46 @@
+PIECE HELPER  —  guilda Piece화
+==============================
+
+O app da guilda que junta a troca de contas (antigo Piece Account Switcher) e a máquina virtual
+com a placa de vídeo para abrir outra conta do Grand Chase no mesmo PC.
+
+Como usar
+---------
+1. Extraia a pasta inteira para algum lugar fixo (ex.: C:\Jogos\Piece Helper).
+2. Abra "PieceHelper.exe".
+   O Windows pode mostrar "O Windows protegeu o computador" porque o app não é assinado:
+   clique em "Mais informações" e depois em "Executar assim mesmo".
+3. Se você usava o Piece Account Switcher, os apelidos, cores e anotações das contas vêm junto
+   na primeira vez que o Piece Helper abre.
+
+Contas (Steam / Grand Chase)
+----------------------------
+- As contas que você já logou na Steam com "Lembrar senha" aparecem sozinhas.
+- "Trocar" fecha a Steam e abre já logada na conta escolhida.
+- Com "Abrir o Grand Chase ao trocar" marcado, o botão vira "Jogar GC".
+- Botão direito no card (ou nos "⋮") para apelido, personagem, cor, anotação e favorito.
+- Fechar a janela deixa o app na bandeja: botão direito no ícone 화 para trocar de conta rapidinho.
+
+Máquina virtual
+---------------
+- Precisa de Windows Pro (o Home não tem Hyper-V) e de abrir o app como administrador.
+  A própria tela tem o botão "Abrir como administrador".
+- "Criar uma VM do zero": baixa o Windows 10 ou 11 da Microsoft (ou usa uma ISO sua), instala sozinho
+  com usuário sem senha e sem conta da Microsoft, deixa o Windows leve, coloca a placa de vídeo e,
+  se quiser, instala a Steam e copia o Grand Chase do seu PC para dentro da VM.
+- Já tem uma VM? Dá para colocar a placa de vídeo nela, ajustar processador e memória e mudar a
+  resolução da janela.
+- Sempre que atualizar o driver da placa de vídeo no PC, use "Atualizar drivers da VM".
+  O app avisa com um ponto amarelo no menu.
+- Alguns jogos com anti-cheat não abrem dentro de máquinas virtuais. O app não tenta esconder a VM.
+
+Segurança
+---------
+O app NÃO guarda senhas. Ele só troca os arquivos de sessão que o próprio launcher cria.
+Antes de mexer no loginusers.vdf da Steam, ele faz backup em %AppData%\Piece Helper\backups
+
+Créditos
+--------
+Troca de contas inspirada no TcNo Account Switcher (github.com/TCNOco/TcNo-Acc-Switcher).
+Cópia de drivers da placa adaptada do Easy-GPU-PV (MIT, github.com/jamesstringerparsec/Easy-GPU-PV).
+Download do Windows pelo Fido (GPLv3, github.com/pbatard/Fido), baixado na hora do GitHub oficial.
