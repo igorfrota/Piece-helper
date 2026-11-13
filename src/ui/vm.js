@@ -13,9 +13,12 @@ const VMUI = (() => {
     refresh: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg>',
     screen: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
     plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+    x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    wrench: '<svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg>',
+    doc: '<svg viewBox="0 0 24 24"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>',
   };
   const callout = (kind, title, text) => `<div class="callout ${kind}">${SVG[kind === 'crit' ? 'warn' : kind] || SVG.info}<div><b>${esc(title)}</b>${text ? `<p>${text}</p>` : ''}</div></div>`;
-  const S = { data: null, sel: null, busy: false };
+  const S = { data: null, sel: null, busy: false, doc: null, docBusy: false, docStale: true };
 
   /* ---------- janela grande e confirmação ---------- */
   function wmodal(html) {
@@ -57,7 +60,7 @@ const VMUI = (() => {
           <button class="btn small ${j.done ? 'ghost' : 'primary'}" data-job="${j.id}">Ver detalhes</button>
           ${j.done ? `<button class="btn small ghost icon" data-jobx="${j.id}" title="Dispensar">✕</button>` : ''}</div>
         <div class="bar ${!j.done && pct == null ? 'indet' : ''}"><i style="width:${j.done ? 100 : pct || 0}%"></i></div>
-        <div class="jc-step">${esc(lastStep(j))}</div></div>`;
+        <div class="jc-step">${j.steps && j.step >= 0 && j.step < j.steps.length ? `<b>Etapa ${j.step + 1} de ${j.steps.length}:</b> ${esc(j.steps[j.step])} · ` : ''}${esc(lastStep(j))}</div></div>`;
     }).join('');
     box.querySelectorAll('[data-job]').forEach((b) => (b.onclick = () => openJob(b.dataset.job)));
     box.querySelectorAll('[data-jobx]').forEach((b) => (b.onclick = () => { J[b.dataset.jobx].ended = 0; paintJobs(); }));
@@ -88,9 +91,33 @@ const VMUI = (() => {
     const bar = el.querySelector('#jBar');
     if (j.progress != null || j.done) { bar.classList.remove('indet'); bar.firstChild.style.width = `${j.done ? 100 : j.progress * 100}%`; }
     el.querySelector('#jTime').textContent = elapsed(j);
+    const sl = el.querySelector('#jSteps');
+    if (sl && j.steps) {
+      sl.hidden = false;
+      sl.innerHTML = j.steps.map((t, i) => {
+        const st = i < j.step || (j.done && j.ok) ? 'done' : i === j.step ? (j.done ? 'bad' : 'run') : '';
+        return `<li class="${st}"><i>${st === 'done' ? SVG.ok : st === 'bad' ? SVG.x : st === 'run' ? '<span class="spin"></span>' : i + 1}</i>${esc(t)}</li>`;
+      }).join('');
+    }
     if (j.done) {
       el.querySelector('#jSpin')?.remove(); el.querySelector('#jCancel')?.remove();
-      el.querySelector('#jStatus').innerHTML = j.ok ? '<b style="color:var(--em2)">Concluído.</b>' : '<b style="color:var(--danger)">Terminou com problema. Veja as mensagens acima.</b>';
+      el.querySelector('#jStatus').innerHTML = j.ok ? '<b style="color:var(--em2)">Concluído.</b>'
+        : `<b style="color:var(--danger)">Terminou com problema${j.steps && j.step < j.steps.length ? ` na etapa ${j.step + 1} (${esc(j.steps[j.step])})` : ''}. Veja as mensagens abaixo.</b>`;
+      const acts = el.querySelector('#jActs');
+      if (acts && !acts.dataset.done) {
+        acts.dataset.done = '1';
+        const x = j.extra || {};
+        let h = '';
+        if (!j.ok && x.retry) h += '<button class="btn primary" id="jRetry">' + SVG.refresh + 'Tentar de novo</button>';
+        if (!j.ok) h += '<button class="btn ghost" id="jReport">' + SVG.doc + 'Gerar relatório para o suporte</button>';
+        if (x.zip) h += '<button class="btn primary" id="jZip">Mostrar o arquivo</button><button class="btn ghost" id="jCopy">Copiar o resumo</button>';
+        acts.insertAdjacentHTML('afterbegin', h);
+        const b = (id, fn) => { const e = acts.querySelector(id); if (e) e.onclick = fn; };
+        b('#jRetry', () => { viewing = null; $('#wmodal').hidden = true; run(V.create(x.retry.opts), j.title, null, x.retry); });
+        b('#jReport', () => { viewing = null; $('#wmodal').hidden = true; makeReport(); });
+        b('#jZip', () => window.piece.showItem(x.zip));
+        b('#jCopy', async () => { try { await navigator.clipboard.writeText(x.summary || ''); toast('Resumo copiado. Cole no Discord junto com o arquivo.'); } catch { toast('Não consegui copiar.', 'err'); } });
+      }
     }
   }
 
@@ -99,8 +126,9 @@ const VMUI = (() => {
     if (!j) return;
     const m = wmodal(`<div class="vm-name"><h3 style="margin:0;flex:1">${esc(j.title)}</h3><span class="jc-time" id="jTime"></span>${j.done ? '' : '<div class="spin" id="jSpin"></div>'}</div>
       <p class="fine" id="jStatus" style="margin-top:8px">Rodando… pode fechar esta janela: o progresso continua aparecendo no topo da tela de Máquina virtual e no menu.</p>
+      <ol class="jsteps" id="jSteps" hidden></ol>
       <div class="console"><div class="bar indet" id="jBar"><i></i></div><div class="console-body" id="jBody"></div></div>
-      <div class="modal-actions" style="margin-top:14px">${j.done ? '' : '<button class="btn ghost" id="jCancel">Cancelar tarefa</button>'}<button class="btn primary" data-close>Fechar</button></div>`);
+      <div class="modal-actions" id="jActs" style="margin-top:14px">${j.done ? '' : '<button class="btn ghost" id="jCancel">Cancelar tarefa</button>'}<button class="btn ${j.done ? 'ghost' : 'primary'}" data-close>Fechar</button></div>`);
     viewing = id;
     const close = m.close;
     m.el.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => { viewing = null; close(); }));
@@ -124,13 +152,16 @@ const VMUI = (() => {
       j.lines.push(...snap.lines);
       since = snap.total;
       j.progress = snap.progress;
+      j.steps = snap.steps; j.step = snap.step; j.extra = snap.extra;
       if (snap.done) { j.done = true; j.ok = snap.ok; j.ended = Date.now(); }
       paintJobs();
       if (snap.done) break;
       await new Promise((ok) => setTimeout(ok, 700));
     }
     if (!j.done) { j.done = true; j.ok = false; j.ended = Date.now(); paintJobs(); }
-    if (j.ok) toast(`${title}: concluído.`); else toast(`${title}: terminou com problema. Veja em "Ver detalhes".`, 'err', 8000);
+    if (j.extra && j.extra.rebooting) toast('O PC vai reiniciar em alguns segundos. O Piece Helper abre sozinho quando o Windows voltar.', 'warn', 15000);
+    else if (j.ok) toast(`${title}: concluído.`); else toast(`${title}: terminou com problema. Veja em "Ver detalhes".`, 'err', 8000);
+    S.docStale = true;
     await load(false);
     return j;
   }
@@ -142,7 +173,7 @@ const VMUI = (() => {
     openJob(jobId);
     return p;
   }
-  async function run(promise, title, after) {
+  async function run(promise, title, after, retry) {
     try {
       const id = await call(promise);
       const j = await follow(id, title);
@@ -155,11 +186,83 @@ const VMUI = (() => {
     const body = $('#vmBody');
     if (spin || !body.childElementCount) body.innerHTML = '<div class="loading"><div class="spin"></div>Procurando o Hyper-V e as máquinas virtuais…</div>';
     try { S.data = await call(V.status()); } catch (e) { body.innerHTML = callout('crit', 'Não consegui ler as máquinas virtuais', esc(e.message)); return; }
-    $('#vmDot').hidden = !S.data.vms.some((v) => v.drivers === 'outdated');
-    body.innerHTML = render(S.data);
+    body.innerHTML = '<div id="vmDoctor"></div>' + render(S.data);
     bind(S.data);
     paintJobs();
+    paintDoctor();
+    if (S.docStale && !Object.values(J).some((j) => !j.done)) diagnose();
   }
+
+  /* ---------- Verificar e corrigir ---------- */
+  async function diagnose() {
+    if (S.docBusy) return;
+    S.docBusy = true; S.docStale = false; paintDoctor();
+    try { S.doc = await call(V.diagnose()); } catch (e) { S.doc = { error: e.message, checks: [] }; }
+    S.docBusy = false; paintDoctor();
+    const bad = (S.doc.checks || []).filter((c) => c.level !== 'ok');
+    $('#vmDot').hidden = !bad.length;
+  }
+  const levelIcon = (l) => `<i class="doc-ico ${l}">${l === 'ok' ? SVG.ok : l === 'fail' ? SVG.x : SVG.warn}</i>`;
+  function paintDoctor() {
+    const box = document.getElementById('vmDoctor');
+    if (!box) return;
+    const d = S.doc;
+    if (!d || (S.docBusy && !d.checks.length)) {
+      box.innerHTML = `<div class="panel doc"><div class="doc-head"><div class="spin"></div><div><b>Examinando o PC…</b><small>Hyper-V, BIOS, placa de vídeo e driver, espaço em disco, internet e as máquinas virtuais.</small></div></div></div>`;
+      return;
+    }
+    if (d.error) { box.innerHTML = callout('warn', 'Não consegui examinar o PC', esc(d.error)); return; }
+    const bad = d.checks.filter((c) => c.level !== 'ok').sort((a, b) => (a.level === 'fail' ? 0 : 1) - (b.level === 'fail' ? 0 : 1));
+    const good = d.checks.filter((c) => c.level === 'ok');
+    const fixable = bad.filter((c) => c.fix && (c.fix.kind === 'job' || c.fix.kind === 'elevate') && !c.manual);
+    const items = bad.map((c, i) => `<li class="doc-item ${c.level}">${levelIcon(c.level)}<div class="doc-txt"><b>${esc(c.title)}</b>${c.text ? `<p>${c.text}</p>` : ''}</div>
+      ${c.fix ? `<button class="btn small ${c.level === 'fail' ? 'primary' : ''}" data-fix="${i}">${c.fix.kind === 'job' ? SVG.wrench : ''}${esc(c.fix.label)}</button>` : ''}</li>`).join('');
+    box.innerHTML = `<div class="panel doc ${bad.length ? (bad.some((c) => c.level === 'fail') ? 'has-fail' : 'has-warn') : 'all-ok'}">
+      <div class="doc-head">${levelIcon(bad.length ? (bad.some((c) => c.level === 'fail') ? 'fail' : 'warn') : 'ok')}
+        <div><b>${bad.length ? (bad.length === 1 ? '1 coisa para resolver' : `${bad.length} coisas para resolver`) : 'Tudo certo com o PC e as VMs'}</b>
+        <small>${S.docBusy ? 'Examinando de novo…' : `Verificado às ${new Date(d.at || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}. Cada item tem o botão que resolve.`}</small></div>
+        <span class="spacer"></span>
+        <button class="btn small ghost" id="docAgain" ${S.docBusy ? 'disabled' : ''}>${SVG.refresh}Verificar de novo</button>
+        ${fixable.length > 1 ? `<button class="btn small primary" id="docAll">${SVG.wrench}Resolver tudo (${fixable.length})</button>` : ''}</div>
+      ${bad.length ? `<ul class="doc-list">${items}</ul>` : ''}
+      <details class="doc-good"><summary>${good.length} ${good.length === 1 ? 'item em ordem' : 'itens em ordem'}</summary><ul class="doc-list">${good.map((c) => `<li class="doc-item ok">${levelIcon('ok')}<div class="doc-txt"><b>${esc(c.title)}</b></div></li>`).join('')}</ul></details>
+      <div class="doc-foot"><button class="btn small ghost" id="docReport">${SVG.doc}Gerar relatório para o suporte</button><span class="fine">Junta num .zip o que o suporte precisa (sem senhas e sem o seu nome de usuário) e salva na área de trabalho.</span></div>
+    </div>`;
+    box.querySelector('#docAgain').onclick = () => diagnose();
+    box.querySelector('#docReport').onclick = () => makeReport();
+    box.querySelectorAll('[data-fix]').forEach((b) => (b.onclick = () => doFix(bad[+b.dataset.fix])));
+    const all = box.querySelector('#docAll');
+    if (all) all.onclick = () => doFixAll(fixable);
+  }
+
+  // texto da confirmação de cada correção (o que vai acontecer)
+  function fixWarning(c) {
+    const a = c.fix.action;
+    if (a === 'bios') return `<p>O PC vai reiniciar direto na BIOS. Salve o que estiver aberto.</p>${c.bios ? `<ol class="steps"><li>Na BIOS: ${c.bios.where}.</li><li>Deixe ${c.bios.opt} em <b>Enabled</b>.</li><li>Aperte <b>F10</b> e confirme para salvar e reiniciar.</li></ol>` : ''}<p>Tire uma foto destas instruções com o celular. Quando o Windows voltar, o Piece Helper abre sozinho e confere.</p>`;
+    if (c.fix.reboot) return '<p>O PC vai reiniciar em 20 segundos: salve o que estiver aberto. Quando o Windows voltar, o Piece Helper abre sozinho e continua.</p>';
+    if (a === 'driver') return '<p>O Piece Helper baixa o driver oficial e instala sozinho. A tela pode piscar ou ficar preta por alguns segundos durante a instalação. As VMs que usam a placa são desligadas no fim para receber o driver novo: salve o que estiver aberto nelas.</p>';
+    if (a === 'cleanup') return '<p>Vai apagar: arquivos temporários do Windows, cache de atualizações já instaladas, downloads incompletos do Piece Helper e <b>esvaziar a Lixeira</b>. Seus documentos, jogos e programas não são tocados. Pode levar até 15 minutos.</p>';
+    if (/^vm(Drivers|Repair|Game|Ram|Checkpoint)$/.test(a)) return `<p>A VM <b>${esc(c.vm || c.fix.arg)}</b> vai ser desligada (salve o que estiver aberto nela) e ligada de novo no fim.</p>`;
+    return '';
+  }
+  async function doFix(c) {
+    const f = c.fix;
+    if (f.kind === 'elevate') { try { await call(window.piece.elevate()); } catch (e) { toast(e.message, 'err'); } return; }
+    if (f.kind === 'open') { try { await call(window.piece.openUrl(f.url)); } catch (e) { toast(e.message, 'err'); } return; }
+    const w = fixWarning(c);
+    if (w && !(await ask(f.label + '?', w, f.label))) return;
+    run(V.fix(f.action, f.arg), f.label);
+  }
+  async function doFixAll(list) {
+    if (list.some((c) => c.fix.kind === 'elevate')) { toast('Primeiro o Piece Helper precisa abrir como administrador. Depois clique em "Resolver tudo" de novo.', 'warn', 7000); try { await call(window.piece.elevate()); } catch (e) { toast(e.message, 'err'); } return; }
+    const reb = list.some((c) => c.fix.reboot);
+    const html = `<p>O Piece Helper vai resolver, nesta ordem:</p><ul class="steps">${list.map((c) => `<li>${esc(c.fix.label)} <span style="color:var(--dim)">— ${esc(c.title)}</span></li>`).join('')}</ul>
+      ${list.some((c) => c.fix.action === 'cleanup') ? '<p>A limpeza esvazia a Lixeira.</p>' : ''}${list.some((c) => /^vm|driver/.test(c.fix.action)) ? '<p>As VMs envolvidas são desligadas durante as correções: salve o que estiver aberto nelas.</p>' : ''}
+      ${reb ? '<p><b>No fim o PC reinicia</b> e o Piece Helper abre sozinho para conferir. Salve o que estiver aberto.</p>' : ''}`;
+    if (!(await ask('Resolver tudo?', html, 'Resolver tudo'))) return;
+    run(V.fixAll(list.map((c) => ({ action: c.fix.action, arg: c.fix.arg }))), 'Resolver tudo');
+  }
+  function makeReport() { run(V.report(), 'Relatório para o suporte'); }
   function current(r) { return r.vms.find((x) => x.name === S.sel) || r.vms.find((x) => x.gpu) || r.vms[0]; }
 
   function render(r) {
@@ -214,7 +317,11 @@ const VMUI = (() => {
       <div class="vm-row">
         ${running ? `<button class="btn primary" id="vmOpen">${SVG.screen}Abrir a janela da VM</button><button class="btn ghost" id="vmRes">Resolução da janela</button><button class="btn ghost" id="vmOff">${SVG.stop}Desligar</button>`
     : `<button class="btn primary" id="vmOn">${SVG.play}Ligar e abrir</button>`}
-        <span class="spacer"></span><button class="btn ghost small" id="vmHelper">Instalar o Piece Helper na VM</button><button class="btn ghost small" id="vmMgr">Gerenciador do Hyper-V</button></div></div>`;
+        <span class="spacer"></span><button class="btn ghost small" id="vmHelper">Instalar o Piece Helper na VM</button><button class="btn ghost small" id="vmMgr">Gerenciador do Hyper-V</button></div>
+      <div class="vm-row maint"><span class="fine" style="margin:0">Manutenção:</span>
+        <button class="btn small" id="vmRepair">${SVG.wrench}Consertar a VM</button>
+        <button class="btn small" id="vmGame">${SVG.refresh}Atualizar o GC da VM</button>
+        <span class="spacer"></span><button class="btn small danger" id="vmRecreate">Refazer a VM do zero</button></div></div>`;
 
     let gpu;
     if (!v.gpu) {
@@ -238,7 +345,8 @@ const VMUI = (() => {
         <span class="spacer"></span>${v.tune_backup ? '<button class="btn ghost" id="vmTuneUndo">Voltar ao que era</button>' : ''}<button class="btn primary" id="vmTune">Aplicar</button></div>
       <p class="fine">Agora: ${esc(v.cpus)} processadores e ${gb(v.ram)} de memória ${v.dyn ? 'dinâmica' : 'fixa'}.</p></div>`;
     const notes = `<div class="panel vm-sec"><h2>Bom saber</h2><ul class="steps">
-      <li>Sempre que atualizar o driver da placa de vídeo no PC, atualize também os drivers da VM aqui. Um ponto amarelo no menu avisa.</li>
+      <li>Quando o driver da placa muda no PC, o Piece Helper atualiza a VM sozinho ao abrir (se ela estiver desligada) ou mostra o botão em "Verificar e corrigir".</li>
+      <li>Deu problema? Use "Consertar a VM" (não apaga nada). Se não resolver, "Refazer a VM do zero" cria de novo com as mesmas configurações.</li>
       <li>O ideal é o mesmo Windows no PC e na VM (10 com 10, 11 com 11).</li>
       <li>Com a placa na VM, não dá para criar pontos de verificação dela. Para um backup: tire a placa, crie o ponto e coloque a placa de novo.</li>
       <li>A placa é compartilhada: o PC continua usando ela normalmente. Nada é gravado na placa e dá para desfazer tudo.</li>
@@ -284,6 +392,15 @@ const VMUI = (() => {
       run(V.tune(v.name, c, m), 'Ajustar a VM');
     });
     on('vmTuneUndo', () => run(V.tuneUndo(v.name), 'Voltar a VM ao original'));
+    on('vmRepair', async () => {
+      if (await ask('Consertar a VM?', `<p>Sem apagar nada da VM <b>${esc(v.name)}</b>, o Piece Helper: confere as configurações, coloca a placa de vídeo de novo, copia os drivers atuais, religa a internet, reaplica a correção da Steam (erro LoadLibrary) e atualiza o Piece Helper dentro dela.</p><p>A VM é desligada durante o conserto: salve o que estiver aberto nela.</p>`, 'Consertar')) run(V.repair(v.name), `Consertar a VM ${v.name}`);
+    });
+    on('vmGame', async () => {
+      if (await ask('Atualizar o Grand Chase da VM?', `<p>Copia a versão do Grand Chase deste PC para a VM <b>${esc(v.name)}</b> (só os arquivos que mudaram), sem baixar de novo pela Steam dela. Feche o jogo no PC antes. A VM é desligada durante a cópia.</p>`, 'Atualizar')) run(V.gameSync(v.name), `Atualizar o GC da VM ${v.name}`);
+    });
+    on('vmRecreate', async () => {
+      if (await ask(`Refazer a VM ${esc(v.name)} do zero?`, `<p><b>Apaga a VM ${esc(v.name)} e tudo o que tem dentro dela</b> (o login da Steam e o que você instalou lá) e cria de novo com as mesmas configurações: Windows, processador, memória, placa, Steam e Grand Chase.</p><p>Use quando "Consertar a VM" não resolver. O Windows já baixado é reaproveitado.</p>`, 'Apagar e refazer')) run(V.recreate(v.name), `Refazer a VM ${v.name}`);
+    });
   }
 
   /* ---------- criar uma VM do zero ---------- */
@@ -368,13 +485,27 @@ const VMUI = (() => {
   }
 
   $('#vmRefresh').onclick = () => load(true);
-  // aviso no menu quando o driver da placa foi atualizado no PC e a VM ficou para trás
+  // ao abrir o app: confere sozinho. Drivers da VM desatualizados com a VM desligada são atualizados na hora;
+  // o resto aparece no menu (ponto amarelo) e na tela de Máquina virtual com o botão que resolve.
   setTimeout(async () => {
     try {
       const r = await call(V.status());
-      if (r.vms.some((v) => v.drivers === 'outdated')) { $('#vmDot').hidden = false; toast('Os drivers da placa de vídeo na máquina virtual estão desatualizados. Veja em Máquina virtual.', 'warn', 8000); }
+      if (!r.vms.length) return;
+      await diagnose();
+      const bad = (S.doc.checks || []).filter((c) => c.level !== 'ok');
+      const auto = r.admin ? bad.filter((c) => /:drv$/.test(c.id) && c.level === 'fail' && (r.vms.find((v) => v.name === c.vm) || {}).state === 'Off') : [];
+      for (const c of auto) { toast(`O driver da placa mudou: atualizando a VM ${c.vm} sozinho.`, 'ok', 7000); track(await call(V.fix('vmDrivers', c.vm)), `Drivers da VM ${c.vm}`); }
+      const rest = bad.filter((c) => !auto.includes(c) && (c.vm || c.id === 'driver' || c.id === 'hvlaunch' || c.id === 'vmms'));
+      if (rest.length) toast(`O Piece Helper achou ${rest.length === 1 ? '1 coisa' : rest.length + ' coisas'} para resolver na máquina virtual. Abra "Máquina virtual" e clique em Resolver.`, 'warn', 9000);
     } catch { /* sem Hyper-V: nada a avisar */ }
-  }, 12000);
+  }, 9000);
+
+  // voltou de um reinício pedido pelo "Verificar e corrigir"
+  window.piece.on('app:continue', () => {
+    toast('Voltamos! Conferindo se ficou tudo certo…', 'ok', 6000);
+    S.docStale = true;
+    $('#navVm').click();
+  });
 
   return { load };
 })();

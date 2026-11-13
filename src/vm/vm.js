@@ -15,7 +15,7 @@ const PS_DIR = path.join(__dirname, 'ps').replace('app.asar', 'app.asar.unpacked
 let DATA = path.join(os.homedir(), '.piece-helper');
 let HELPER_DIR = null; // pasta do Piece Helper instalado (para copiar para dentro da VM)
 const ps = (name) => fs.readFileSync(path.join(__dirname, 'ps', name + '.ps1'), 'utf8');
-const dirs = () => ({ state: path.join(DATA, 'vm_gpu.json'), tmp: path.join(DATA, 'tmp'), tools: path.join(DATA, 'tools'), iso: path.join(DATA, 'iso') });
+const dirs = () => ({ state: path.join(DATA, 'vm_gpu.json'), tmp: path.join(DATA, 'tmp'), tools: path.join(DATA, 'tools'), iso: path.join(DATA, 'iso'), logs: path.join(DATA, 'logs') });
 
 function init(dataDir, helperDir) { DATA = dataDir; HELPER_DIR = helperDir && fs.existsSync(path.join(helperDir, 'PieceHelper.exe')) ? helperDir : null; }
 const helperAvailable = () => !!HELPER_DIR;
@@ -38,9 +38,13 @@ function isAdmin() {
 // ---------------------------------------------------------------- tarefas com saída ao vivo
 const jobs = {};
 class Job {
-  constructor(title) { this.id = crypto.randomBytes(5).toString('hex'); this.title = title; this.lines = []; this.done = false; this.ok = null; this.progress = null; this.cancel = false; this.proc = null; this.started = Date.now(); }
+  constructor(title) { this.id = crypto.randomBytes(5).toString('hex'); this.title = title; this.lines = []; this.done = false; this.ok = null; this.progress = null; this.cancel = false; this.proc = null; this.started = Date.now(); this.steps = null; this.step = -1; this.extra = null; }
+  setSteps(list) { this.steps = list; this.step = 0; }
+  setStep(i) { if (this.steps) this.step = Math.max(this.step, i); }
   log(text, kind = '') {
     for (const part of String(text).split(/\r?\n/)) {
+      const ms = /^##STEP (\d+)/.exec(part.trim());
+      if (ms) { this.setStep(+ms[1]); continue; }
       if (part.startsWith('\r') || (this._cr && this.lines.length)) { this.lines[this.lines.length - 1] = { t: part.replace(/^\r/, ''), k: kind }; this._cr = false; continue; }
       if (part !== '' || kind) this.lines.push({ t: part, k: kind });
     }
@@ -51,7 +55,7 @@ class Job {
     this._prog = true;
   }
   endProgress() { this._prog = false; }
-  snapshot(since = 0) { return { id: this.id, title: this.title, lines: this.lines.slice(since), total: this.lines.length, done: this.done, ok: this.ok, progress: this.progress }; }
+  snapshot(since = 0) { return { id: this.id, title: this.title, lines: this.lines.slice(since), total: this.lines.length, done: this.done, ok: this.ok, progress: this.progress, steps: this.steps, step: this.step, extra: this.extra }; }
 }
 function startJob(title, fn) {
   const j = new Job(title);
@@ -59,8 +63,23 @@ function startJob(title, fn) {
   (async () => {
     try { const r = await fn(j); j.ok = r !== false; } catch (e) { j.log('Erro: ' + (e.message || e), 'err'); j.ok = false; }
     j.done = true;
+    saveLog(j);
   })();
   return j.id;
+}
+// guarda o histórico de cada tarefa (vai junto no relatório para o suporte); fica só nas 40 mais recentes
+function saveLog(j) {
+  try {
+    const d = dirs().logs;
+    fs.mkdirSync(d, { recursive: true });
+    const t = new Date(j.started), pad = (n) => String(n).padStart(2, '0');
+    const stamp = `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}-${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}`;
+    const head = [`Tarefa: ${j.title}`, `Início: ${t.toLocaleString('pt-BR')}`, `Duração: ${Math.round((Date.now() - j.started) / 1000)} s`, `Resultado: ${j.ok ? 'concluído' : 'com problema'}`,
+      j.steps ? `Etapa: ${j.step + 1} de ${j.steps.length} (${j.steps[j.step] || ''})` : '', ''].filter((x) => x !== '').join('\r\n');
+    fs.writeFileSync(path.join(d, `${stamp} ${j.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 60)}.log`), head + '\r\n\r\n' + j.lines.map((l) => l.t).join('\r\n'), 'utf8');
+    const all = fs.readdirSync(d).filter((f) => f.endsWith('.log')).sort();
+    for (const f of all.slice(0, Math.max(0, all.length - 40))) fs.unlinkSync(path.join(d, f));
+  } catch { /* o log é só ajuda */ }
 }
 const pollJob = (id, since) => (jobs[id] ? jobs[id].snapshot(since) : { done: true, ok: false, lines: [], total: 0 });
 function cancelJob(id) { const j = jobs[id]; if (!j) return false; j.cancel = true; try { j.proc && j.proc.kill(); } catch { /* */ } return true; }
@@ -167,8 +186,9 @@ function checkVersions(job, hostBuild, guestBuild) {
 const findVm = async (name) => { const s = await status(); return { s, v: s.vms.find((x) => x.name === name) }; };
 
 // ---------------------------------------------------------------- placa de vídeo, processador e memória
-function gpuSetup(name, gpuId) {
-  return startJob(`Placa de vídeo na VM ${name}`, async (j) => {
+function gpuSetup(name, gpuId) { return startJob(`Placa de vídeo na VM ${name}`, (j) => gpuSetupRun(j, name, gpuId)); }
+async function gpuSetupRun(j, name, gpuId) {
+  {
     const { s, v } = await findVm(name);
     if (!v) { j.log(`Não achei a VM '${name}'.`, 'err'); return false; }
     const g = s.gpus.find((x) => x.id === gpuId);
@@ -180,17 +200,18 @@ function gpuSetup(name, gpuId) {
     const { ok, result } = await runScript(j, ps('gpu_setup'), { VMName: name, GpuId: gpuId });
     if (!ok) return false;
     const st = loadState();
-    st[name] = { gpu_id: gpuId, gpu_name: g.name, driver: g.driver, guest_build: (result || {}).guest, prev, date: new Date().toISOString() };
+    st[name] = { ...(st[name] || {}), gpu_id: gpuId, gpu_name: g.name, driver: g.driver, guest_build: (result || {}).guest, prev, date: new Date().toISOString() };
     saveState(st);
     checkVersions(j, s.build, (result || {}).guest);
     j.log('Pronto! Ligue a VM e confira em Gerenciador de Dispositivos > Adaptadores de vídeo (dentro dela).', 'ok');
-    j.log('Sempre que atualizar o driver da placa no seu PC, use "Atualizar drivers da VM" aqui.');
+    j.log('Quando o driver da placa mudar no seu PC, o Piece Helper avisa e atualiza a VM com um clique.');
     return true;
-  });
+  }
 }
 
-function gpuUpdate(name) {
-  return startJob(`Atualizar drivers da VM ${name}`, async (j) => {
+function gpuUpdate(name) { return startJob(`Atualizar drivers da VM ${name}`, (j) => gpuUpdateRun(j, name)); }
+async function gpuUpdateRun(j, name) {
+  {
     const { s, v } = await findVm(name);
     if (!v || !v.gpu) { j.log('Essa VM não está com a placa de vídeo.', 'err'); return false; }
     const g = s.gpus.find((x) => x.id === v.gpu_id);
@@ -206,7 +227,7 @@ function gpuUpdate(name) {
     checkVersions(j, s.build, rec.guest_build);
     j.log('Drivers da VM atualizados.', 'ok');
     return true;
-  });
+  }
 }
 
 function gpuRemove(name) {
@@ -215,7 +236,9 @@ function gpuRemove(name) {
     j.log(`Tirando a placa de vídeo da VM '${name}'.`, 'title');
     const { ok } = await runScript(j, ps('gpu_remove'), { VMName: name, PrevCheckpoint: prev.checkpoint || '', PrevAuto: String(!!prev.autockpt), PrevStop: prev.stopAction || 'Save' });
     if (ok) {
-      const st = loadState(); delete st[name]; saveState(st);
+      const st = loadState();
+      if (st[name]) { for (const k of ['gpu_id', 'gpu_name', 'driver', 'guest_build', 'prev', 'date']) delete st[name][k]; if (!Object.keys(st[name]).length) delete st[name]; }
+      saveState(st);
       j.log('Pronto. A VM voltou a funcionar sem a placa de vídeo. Os arquivos de driver copiados ficam inertes dentro dela.', 'ok');
     }
     return ok;
@@ -430,12 +453,12 @@ function unattendXml(user, comp, lite, steam, gpu) { // (o atalho do Piece Helpe
 }
 
 // download com redirecionamentos e progresso
-function download(url, dest, job, p0, p1, redirects = 0) {
+function download(url, dest, job, p0, p1, redirects = 0, headers = {}) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PieceHelper' } }, (res) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PieceHelper', ...headers } }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects < 8) {
         res.resume();
-        return resolve(download(new URL(res.headers.location, url).toString(), dest, job, p0, p1, redirects + 1));
+        return resolve(download(new URL(res.headers.location, url).toString(), dest, job, p0, p1, redirects + 1, headers));
       }
       if (res.statusCode !== 200) { res.resume(); return reject(new Error(`O servidor respondeu ${res.statusCode}.`)); }
       const total = parseInt(res.headers['content-length'] || '0', 10);
@@ -461,11 +484,15 @@ function download(url, dest, job, p0, p1, redirects = 0) {
   });
 }
 
-async function getWindowsIso(job, win) {
+async function getWindowsIso(job, win, isoDir) {
   const lang = msLanguage(hostCulture());
   const d = dirs();
-  fs.mkdirSync(d.iso, { recursive: true });
-  const iso = path.join(d.iso, `Win${win}_${lang.replace(/[^A-Za-z]/g, '')}_x64.iso`);
+  const dir = isoDir || d.iso;
+  fs.mkdirSync(dir, { recursive: true });
+  const fname = `Win${win}_${lang.replace(/[^A-Za-z]/g, '')}_x64.iso`;
+  const old = path.join(d.iso, fname);
+  if (dir !== d.iso && fs.existsSync(old) && fs.statSync(old).size > 3 * GB) { job.log(`Usando o Windows ${win} que já foi baixado antes (${old}).`); return old; }
+  const iso = path.join(dir, fname);
   if (fs.existsSync(iso) && fs.statSync(iso).size > 3 * GB) { job.log(`Usando o Windows ${win} que já foi baixado antes (${iso}).`); return iso; }
   fs.mkdirSync(d.tools, { recursive: true });
   const fido = path.join(d.tools, 'Fido.ps1');
@@ -495,62 +522,109 @@ async function precheck(opts, steamPath) {
   return validate(resolveGames({ ...opts }, steamPath), await status());
 }
 
+// etapas que aparecem na tela enquanto a VM é criada
+const CREATE_STEPS = ['Conferir o PC e escolher o disco', 'Baixar o Windows', 'Preparar o disco da VM', 'Copiar o Windows para a VM',
+  'Ajustes, drivers, Steam e jogos', 'Criar e ligar a VM'];
+
+// escolhe onde guardar o disco da VM (e a ISO): o disco padrão do Hyper-V se couber, senão o disco com mais espaço
+async function pickStorage(j, needGb) {
+  const d = (await psJson(ps('diag'), 120000)) || {};
+  const drives = asList(d.drives).filter((x) => x && x.letter);
+  const defDir = d.vhdDir || 'C:\\ProgramData\\Microsoft\\Windows\\Virtual Hard Disks';
+  const defL = defDir.slice(0, 1).toUpperCase();
+  const free = (L) => ((drives.find((x) => x.letter.toUpperCase() === L) || {}).free || 0) / GB;
+  let vhdDir = '', vmDir = '', where = defL;
+  if (free(defL) < needGb) {
+    const best = drives.slice().sort((a, b) => b.free - a.free)[0];
+    if (!best || best.free / GB < needGb) {
+      throw new Error(`Falta espaço: a VM precisa de uns ${Math.ceil(needGb)} GB livres e o disco com mais espaço tem ${best ? Math.floor(best.free / GB) : 0} GB. ` +
+        'Use "Verificar e corrigir" no topo da tela: o Piece Helper limpa os arquivos temporários do Windows e mostra quanto falta.');
+    }
+    where = best.letter.toUpperCase();
+    vmDir = `${where}:\\Piece Helper\\VMs`;
+    vhdDir = `${vmDir}\\Discos`;
+    j.log(`O disco ${defL}: tem só ${Math.floor(free(defL))} GB livres. A VM vai ficar no disco ${where}: (${Math.floor(free(where))} GB livres): ${vhdDir}`);
+  } else j.log(`Espaço: ${Math.floor(free(defL))} GB livres no disco ${defL}: (a VM precisa de uns ${Math.ceil(needGb)} GB).`);
+  const isoDir = free('C') < 9 && where !== 'C' ? `${where}:\\Piece Helper\\ISO` : null;
+  return { vhdDir, vmDir, isoDir, build: d.build };
+}
+
+// lê o "buildid" do jogo na Steam deste PC (para saber se o da VM ficou para trás)
+function gameBuild(g) {
+  try { return vdfValues(fs.readFileSync(g.manifest, 'utf8'), 'buildid')[0] || null; } catch { return null; }
+}
+
+async function createRun(j, o) {
+  j.setSteps(CREATE_STEPS);
+  const st = await status();
+  if (st.hyperv !== 'on') { j.log('O Hyper-V não está ligado neste PC. Use "Verificar e corrigir" para ligar.', 'err'); return false; }
+  const err = validate(o, st);
+  if (err) { j.log(err, 'err'); return false; }
+  const name = o.name.trim(), user = o.user.trim();
+  let gpuId = o.gpu_id || '';
+  const g = gpuId ? st.gpus.find((x) => x.id === gpuId && x.shareable) : null;
+  if (gpuId && !g) { j.log('Essa placa não pode ser compartilhada com VMs neste PC. A VM vai ser criada sem ela.', 'err'); gpuId = ''; }
+  j.log(`Criando a VM "${name}".`, 'title');
+  let games = o._games || [];
+  const gamesGb = games.reduce((a, x) => a + (x.size || 0), 0) / GB;
+  const store = await pickStorage(j, 32 + gamesGb * 1.08 + (o.iso ? 0 : 0));
+  j.setStep(1);
+  let iso = o.iso;
+  if (!iso) iso = await getWindowsIso(j, parseInt(o.win, 10), store.isoDir);
+  else j.log('Usando a ISO escolhida: ' + iso);
+  let steam = !!o.steam, setup = '';
+  if (steam) {
+    try {
+      const d = dirs();
+      fs.mkdirSync(d.tools, { recursive: true });
+      setup = path.join(d.tools, 'SteamSetup.exe');
+      if (!fs.existsSync(setup) || Date.now() - fs.statSync(setup).mtimeMs > 30 * 86400000) {
+        j.log('Baixando o instalador oficial da Steam…');
+        await download(STEAM_SETUP_URL, setup, j, j.progress || 0.6, j.progress || 0.6);
+      }
+    } catch (e) {
+      j.log(`Não consegui baixar o instalador da Steam (${e.message}). A VM vai ser criada sem ela.`, 'err');
+      steam = false; setup = ''; games = [];
+    }
+  }
+  j.setStep(2);
+  j.progress = 0.62;
+  const values = {
+    VMName: name, Iso: iso, Cpus: parseInt(o.cpus, 10), RamGB: parseInt(o.ram_gb, 10), DiskGB: parseInt(o.disk_gb, 10),
+    GpuId: gpuId, StartVM: o.start === false ? '0' : '1',
+    Unattend: unattendXml(user, computerName(name, user), o.lite !== false, steam, !!gpuId),
+    SteamSetup: setup,
+    Games: games.length ? JSON.stringify(games.map((x) => ({ name: x.name, src: x.src, dir: x.dir, manifest: x.manifest, gb: Math.round(x.size / GB * 10) / 10 }))) : '',
+    Lite: o.lite === false ? '0' : '1', BloatApps: BLOAT_APPS.join(','),
+    HelperSrc: o.helper !== false && HELPER_DIR ? HELPER_DIR : '',
+    SteamGlFix: steam && gpuId ? '1' : '0',
+    VhdDir: store.vhdDir, VmDir: store.vmDir,
+  };
+  const { ok, result } = await runScript(j, ps('create'), values);
+  if (!ok) return false;
+  // guarda tudo o que precisa para reparar ou refazer a VM igualzinha depois
+  const s = loadState();
+  const keep = { ...o }; delete keep._games;
+  s[name] = { ...(s[name] || {}), opts: keep, created: new Date().toISOString(), vhd: (result || {}).vhd || null,
+    games: games.map((x) => ({ appid: x.appid, name: x.name, build: gameBuild(x) })) };
+  if (gpuId && g) Object.assign(s[name], { gpu_id: gpuId, gpu_name: g.name, driver: g.driver, guest_build: (result || {}).guest,
+    prev: { checkpoint: 'Production', autockpt: false, stopAction: 'ShutDown' }, date: new Date().toISOString() });
+  saveState(s);
+  checkVersions(j, st.build, (result || {}).guest);
+  j.setStep(CREATE_STEPS.length);
+  j.progress = 1;
+  j.log(`Pronto! A VM "${name}" está criada. No primeiro início o Windows termina de se configurar sozinho (uns minutos) e entra direto no usuário "${user}", sem senha.`, 'ok');
+  if (values.HelperSrc) j.log('O Piece Helper já está na VM: atalho "Piece Helper" na área de trabalho dela.');
+  if (steam) j.log('No primeiro início, a Steam se instala sozinha (leva 1 ou 2 minutos). Depois abra pelo atalho "Steam" na área de trabalho da VM e entre com a sua conta.' + (games.length ? ' Os jogos copiados já aparecem instalados (a Steam pode conferir os arquivos uma vez).' : ''));
+  j.log("Lembrete: o Windows da VM precisa da sua própria licença para ser ativado. Sem ativar ele funciona, mas fica com uma marca d'água e algumas opções de personalização bloqueadas.");
+  return true;
+}
+
 function create(opts, steamPath) {
   const o = resolveGames({ ...opts }, steamPath);
-  return startJob(`Criar a VM ${o.name}`, async (j) => {
-    const st = await status();
-    if (st.hyperv !== 'on') { j.log('O Hyper-V não está ligado neste PC.', 'err'); return false; }
-    const err = validate(o, st);
-    if (err) { j.log(err, 'err'); return false; }
-    const name = o.name.trim(), user = o.user.trim();
-    let gpuId = o.gpu_id || '';
-    const g = gpuId ? st.gpus.find((x) => x.id === gpuId && x.shareable) : null;
-    if (gpuId && !g) { j.log('Essa placa não pode ser compartilhada com VMs neste PC. A VM vai ser criada sem ela.', 'err'); gpuId = ''; }
-    j.log(`Criando a VM "${name}".`, 'title');
-    let iso = o.iso;
-    if (!iso) iso = await getWindowsIso(j, parseInt(o.win, 10));
-    let steam = !!o.steam, games = o._games, setup = '';
-    if (steam) {
-      try {
-        const d = dirs();
-        fs.mkdirSync(d.tools, { recursive: true });
-        setup = path.join(d.tools, 'SteamSetup.exe');
-        if (!fs.existsSync(setup) || Date.now() - fs.statSync(setup).mtimeMs > 30 * 86400000) {
-          j.log('Baixando o instalador oficial da Steam…');
-          await download(STEAM_SETUP_URL, setup, j, j.progress || 0.6, j.progress || 0.6);
-        }
-      } catch (e) {
-        j.log(`Não consegui baixar o instalador da Steam (${e.message}). A VM vai ser criada sem ela.`, 'err');
-        steam = false; setup = ''; games = [];
-      }
-    }
-    j.progress = 0.62;
-    const values = {
-      VMName: name, Iso: iso, Cpus: parseInt(o.cpus, 10), RamGB: parseInt(o.ram_gb, 10), DiskGB: parseInt(o.disk_gb, 10),
-      GpuId: gpuId, StartVM: o.start === false ? '0' : '1',
-      Unattend: unattendXml(user, computerName(name, user), o.lite !== false, steam, !!gpuId),
-      SteamSetup: setup,
-      Games: games.length ? JSON.stringify(games.map((x) => ({ name: x.name, src: x.src, dir: x.dir, manifest: x.manifest, gb: Math.round(x.size / GB * 10) / 10 }))) : '',
-      Lite: o.lite === false ? '0' : '1', BloatApps: BLOAT_APPS.join(','),
-      HelperSrc: o.helper !== false && HELPER_DIR ? HELPER_DIR : '',
-      SteamGlFix: steam && gpuId ? '1' : '0',
-    };
-    const { ok, result } = await runScript(j, ps('create'), values);
-    if (!ok) return false;
-    if (gpuId && g) {
-      const s = loadState();
-      s[name] = { gpu_id: gpuId, gpu_name: g.name, driver: g.driver, guest_build: (result || {}).guest,
-        prev: { checkpoint: 'Production', autockpt: false, stopAction: 'ShutDown' }, date: new Date().toISOString() };
-      saveState(s);
-    }
-    checkVersions(j, st.build, (result || {}).guest);
-    j.progress = 1;
-    j.log(`Pronto! A VM "${name}" está criada. No primeiro início o Windows termina de se configurar sozinho (uns minutos) e entra direto no usuário "${user}", sem senha.`, 'ok');
-    if (values.HelperSrc) j.log('O Piece Helper já está na VM: atalho "Piece Helper" na área de trabalho dela.');
-    if (steam) j.log('No primeiro início, a Steam se instala sozinha (leva 1 ou 2 minutos). Depois abra pelo atalho "Steam" na área de trabalho da VM e entre com a sua conta.' + (games.length ? ' Os jogos copiados já aparecem instalados (a Steam pode conferir os arquivos uma vez).' : ''));
-    j.log("Lembrete: o Windows da VM precisa da sua própria licença para ser ativado. Sem ativar ele funciona, mas fica com uma marca d'água e algumas opções de personalização bloqueadas.");
-    return true;
-  });
+  const id = startJob(`Criar a VM ${o.name}`, (j) => createRun(j, o));
+  jobs[id].extra = { retry: { kind: 'create', opts } };
+  return id;
 }
 
 function isoInfo(steamPath) {
@@ -560,5 +634,8 @@ function isoInfo(steamPath) {
   return { isos, lang: msLanguage(hostCulture()), lite: LITE_WHAT, helper: !!HELPER_DIR, games: steamGames(steamPath).map((g) => ({ appid: g.appid, name: g.name, size: g.size })) };
 }
 
-module.exports = { init, isAdmin, installHelper, helperAvailable, status, gpuSetup, gpuUpdate, gpuRemove, tune, tuneUndo, power, hypervEnable, openWindow, openManager,
+module.exports = {
+  _int: { startJob, runScript, psJson, ps, dirs, download, loadState, saveState, GB, asList, steamGames, status, findVm, gpuUpdateRun, gpuSetupRun,
+    createRun, resolveGames, gameBuild, isAdmin, IS_WIN, recommend, vdfValues, jobs, helperDir: () => HELPER_DIR, dataDir: () => DATA },
+  init, isAdmin, installHelper, helperAvailable, status, gpuSetup, gpuUpdate, gpuRemove, tune, tuneUndo, power, hypervEnable, openWindow, openManager,
   create, precheck, isoInfo, pollJob, cancelJob, _test: { unattendXml, validate, computerName, msLanguage, vdfValues, recommend } };

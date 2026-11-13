@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('piece', {
   pickExe: (title) => call('dialog:pickExe', title),
   pickFolder: (title) => call('dialog:pickFolder', title),
   openPath: (p) => call('shell:openPath', p),
+  showItem: (p) => call('shell:showItem', p),
+  openUrl: (u) => call('shell:openUrl', u),
   elevate: () => call('app:elevate'),
   vm: {
     status: () => call('vm:status'),
@@ -35,6 +37,13 @@ contextBridge.exposeInMainWorld('piece', {
     isoInfo: () => call('vm:isoInfo'),
     pickIso: () => call('vm:pickIso'),
     create: (opts) => call('vm:create', opts),
+    diagnose: () => call('vm:diagnose'),
+    fix: (action, arg) => call('vm:fix', action, arg),
+    fixAll: (items) => call('vm:fixAll', items),
+    repair: (name) => call('vm:repair', name),
+    gameSync: (name) => call('vm:gameSync', name),
+    recreate: (name) => call('vm:recreate', name),
+    report: () => call('vm:report'),
   },
   job: { poll: (id, since) => call('job:poll', id, since), cancel: (id) => call('job:cancel', id) },
   win: {
@@ -43,7 +52,7 @@ contextBridge.exposeInMainWorld('piece', {
     close: () => ipcRenderer.send('win:close'),
   },
   on: (ch, fn) => {
-    const ok = ['accounts:changed', 'win:state'];
+    const ok = ['accounts:changed', 'win:state', 'app:continue'];
     if (ok.includes(ch)) ipcRenderer.on(ch, (_e, d) => fn(d));
   },
 });

@@ -21,6 +21,22 @@ Contas (Steam / Grand Chase)
 - Botão direito no card (ou nos "⋮") para apelido, personagem, cor, anotação e favorito.
 - Fechar a janela deixa o app na bandeja: botão direito no ícone 화 para trocar de conta rapidinho.
 
+Verificar e corrigir (novo na 1.1)
+----------------------------------
+- No topo da tela "Máquina virtual" o Piece Helper examina o PC e as VMs e mostra o que precisa resolver,
+  cada item com o botão que resolve. "Resolver tudo" faz todas as correções em sequência.
+- O que ele resolve sozinho: liga o Hyper-V e o serviço de VMs, religa o Hyper-V quando outro programa desligou,
+  baixa e instala o driver oficial da placa (NVIDIA, AMD; Intel pelo Windows Update), atualiza os drivers da VM,
+  desliga os pontos de verificação, religa a internet da VM, escolhe um disco com espaço ou limpa os
+  temporários do Windows, ajusta a memória da VM e atualiza o Grand Chase da VM com a versão do PC.
+- Virtualização desligada na BIOS: nenhum programa liga isso por dentro do Windows. O Piece Helper reinicia
+  o PC direto na BIOS e mostra onde fica a opção na sua placa-mãe.
+- Quando uma correção precisa reiniciar o PC, o Piece Helper abre sozinho quando o Windows voltar e confere.
+- "Gerar relatório para o suporte" salva na área de trabalho um .zip com o que a staff precisa
+  (sem senhas e sem o seu nome de usuário).
+- Na VM: "Consertar a VM" (não apaga nada) e "Refazer a VM do zero" (com as mesmas configurações).
+- A criação da VM mostra as etapas e, se der problema, tem "Tentar de novo" (o Windows baixado é reaproveitado).
+
 Máquina virtual
 ---------------
 - Precisa de Windows Pro (o Home não tem Hyper-V) e de abrir o app como administrador.

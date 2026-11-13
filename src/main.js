@@ -6,6 +6,7 @@ const U = require('./core/util');
 const { Steam } = require('./core/steam');
 const { SnapshotPlatform, BattleNet } = require('./core/platforms');
 const VM = require('./vm/vm');
+const Doctor = require('./vm/doctor');
 
 app.setAppUserModelId('guild.piece.helper');
 if (!app.requestSingleInstanceLock()) { app.quit(); }
@@ -118,8 +119,11 @@ function createWindow() {
   win.removeMenu();
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
   win.once('ready-to-show', () => {
-    const hidden = process.argv.includes('--hidden') || settings().startMinimized;
+    const cont = process.argv.includes('--continuar');
+    const hidden = !cont && (process.argv.includes('--hidden') || settings().startMinimized);
     if (!hidden) win.show();
+    // voltou de um reinício pedido pelo "Verificar e corrigir": abre a máquina virtual e examina de novo
+    if (cont) { Doctor.clearContinue(); setTimeout(() => win.webContents.send('app:continue', {}), 800); }
   });
   win.on('close', (e) => {
     if (!quitting && settings().closeToTray) {
@@ -292,6 +296,15 @@ handle('vm:create', async (opts) => {
   return VM.create(opts, sp);
 });
 handle('vm:reboot', () => { require('child_process').spawn('shutdown', ['/r', '/t', '10', '/c', 'Piece Helper: reiniciando em 10 segundos'], { detached: true, stdio: 'ignore', windowsHide: true }).unref(); });
+handle('vm:diagnose', async () => Doctor.diagnose(await steamPath()));
+handle('vm:fix', async (action, arg) => Doctor.fix(String(action), arg == null ? null : String(arg), await steamPath()));
+handle('vm:fixAll', async (items) => Doctor.fixAll(items, await steamPath()));
+handle('vm:repair', async (name) => Doctor.fix('vmRepair', name, await steamPath()));
+handle('vm:gameSync', async (name) => Doctor.fix('vmGame', name, await steamPath()));
+handle('vm:recreate', async (name) => Doctor.recreate(name, await steamPath()));
+handle('vm:report', async () => Doctor.report(app.getPath('desktop'), app.getVersion(), await steamPath()));
+handle('shell:showItem', (p) => { if (p && fs.existsSync(p)) shell.showItemInFolder(p); });
+handle('shell:openUrl', (u) => { if (/^(https:\/\/|ms-windows-store:|ms-settings:)/i.test(String(u))) return shell.openExternal(String(u)); throw new Error('Endereço não permitido.'); });
 handle('job:poll', (id, since) => VM.pollJob(id, since || 0));
 handle('job:cancel', (id) => VM.cancelJob(id));
 
@@ -313,7 +326,7 @@ ipcMain.on('win:max', () => (win?.isMaximized() ? win.unmaximize() : win?.maximi
 ipcMain.on('win:close', () => win?.close());
 
 // ---------- Ciclo de vida ----------
-app.on('second-instance', showWindow);
+app.on('second-instance', (_e, argv) => { showWindow(); if ((argv || []).includes('--continuar')) { Doctor.clearContinue(); win?.webContents.send('app:continue', {}); } });
 app.on('before-quit', () => { quitting = true; });
 app.whenReady().then(() => {
   createWindow();
