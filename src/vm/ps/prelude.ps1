@@ -2,6 +2,50 @@
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Stop'
 
+# fecha as configuracoes do Windows da VM que o SOS PC abriu (tenta algumas vezes: o Windows demora a soltar)
+function Close-SosHives {
+    foreach ($h in 'HKLM\SOS_SOFT', 'HKLM\SOS_SYS', 'HKLM\SOS_USER') {
+        for ($i = 0; $i -lt 6; $i++) {
+            cmd.exe /c ('reg query ' + $h + ' >nul 2>&1')
+            if ($LASTEXITCODE -ne 0) { break }
+            [gc]::Collect(); [gc]::WaitForPendingFinalizers()
+            cmd.exe /c ('reg unload ' + $h + ' >nul 2>&1')
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 2
+        }
+    }
+}
+
+# Steam: o "gldriverquery" procura o OpenGL do driver, que nao existe em VMs com GPU-P, e mostra
+# "LoadLibrary failed with error 126" toda vez que a Steam abre. Troca por um programa que nao faz nada,
+# nas duas visoes do registro (a Steam e de 32 bits, entao o Windows le a de 32).
+function Set-SosSteamGlFix([string]$root) {
+    & reg.exe load 'HKLM\SOS_GLFIX' ($root + '\Windows\System32\config\SOFTWARE') | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host 'Aviso: nao consegui aplicar a correcao da Steam (gldriverquery).'; return }
+    try {
+        foreach ($base in 'HKLM\SOS_GLFIX', 'HKLM\SOS_GLFIX\WOW6432Node') {
+            foreach ($n in 'gldriverquery.exe', 'gldriverquery64.exe') {
+                & reg.exe add ($base + '\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\' + $n) /v Debugger /t REG_SZ /d 'C:\Windows\System32\systray.exe' /f | Out-Null
+            }
+        }
+        Write-Host 'Correcao do aviso de OpenGL da Steam aplicada.'
+    }
+    finally {
+        [gc]::Collect(); [gc]::WaitForPendingFinalizers(); Start-Sleep -Seconds 1
+        cmd.exe /c 'reg unload HKLM\SOS_GLFIX >nul 2>&1'
+    }
+}
+
+
+# "ferramentas da VM" do Hyper-V: liga todos os servicos de integracao (copiar arquivos, horario,
+# desligamento, pulsacao...) e a sessao avancada (copiar/colar, tela que se ajusta, som e pen drive pela janela)
+function Enable-SosVMTools([string]$vmName) {
+    Get-VMIntegrationService -VMName $vmName -EA SilentlyContinue | Where-Object { -not $_.Enabled } | ForEach-Object {
+        try { Enable-VMIntegrationService -VMName $vmName -Name $_.Name -EA Stop; Write-Host ('Ligado na VM: ' + $_.Name) } catch {}
+    }
+    try { if (-not (Get-VMHost).EnableEnhancedSessionMode) { Set-VMHost -EnableEnhancedSessionMode $true; Write-Host 'Sessao avancada ligada (copiar/colar e tela ajustavel na janela da VM).' } } catch {}
+}
+
 function Stop-SosVM([string]$n) {
     $vm = Get-VM -Name $n
     if ($vm.State -eq 'Off') { return $false }
@@ -121,28 +165,41 @@ function Copy-SosGpuDriversTo([string]$letter, [string]$gpuId) {
     Write-Host ('Arquivos copiados: ' + $copied.Count + ' pacote(s) do driver e ' + $n + ' arquivo(s) avulsos.')
 }
 
-function Copy-SosGpuDrivers([string]$vmName, [string]$gpuId) {
+# abre o disco da VM (desligada) e devolve a letra do Windows dela (ex.: 'W:'); feche com Close-SosVhd
+function Open-SosVhd([string]$vmName) {
     $vhd = (Get-VMHardDiskDrive -VMName $vmName | Where-Object { $_.Path } | Select-Object -First 1).Path
     if (-not $vhd) { throw 'A VM nao tem disco virtual.' }
     Write-Host ('Abrindo o disco da VM: ' + $vhd)
     $disk = Mount-VHD -Path $vhd -PassThru | Get-Disk
-    try {
-        foreach ($p in @(Get-Partition -DiskNumber $disk.Number)) {
-            if (-not $p.DriveLetter -and $p.Type -eq 'Basic' -and $p.Size -gt 10GB) {
-                try { $p | Add-PartitionAccessPath -AssignDriveLetter -EA Stop } catch {}
-            }
+    $script:SosVhd = $vhd
+    $script:SosVhdLetters = @()
+    foreach ($p in @(Get-Partition -DiskNumber $disk.Number)) {
+        if (-not $p.DriveLetter -and $p.Type -eq 'Basic' -and $p.Size -gt 10GB) {
+            try { $p | Add-PartitionAccessPath -AssignDriveLetter -EA Stop } catch {}
         }
-        $letter = $null
-        foreach ($p in @(Get-Partition -DiskNumber $disk.Number)) {
-            if ($p.DriveLetter -and (Test-Path ($p.DriveLetter + ':\Windows\System32'))) { $letter = $p.DriveLetter + ':'; break }
-        }
-        if (-not $letter) { throw 'Nao achei o Windows dentro do disco da VM.' }
-        Copy-SosGpuDriversTo $letter $gpuId
     }
-    finally {
-        Write-Host 'Fechando o disco da VM...'
-        Dismount-VHD -Path $vhd
+    foreach ($p in @(Get-Partition -DiskNumber $disk.Number)) {
+        if ($p.DriveLetter -and (Test-Path ($p.DriveLetter + ':\Windows\System32'))) { $script:SosVhdLetters += [string]$p.DriveLetter; return ($p.DriveLetter + ':') }
     }
+    Close-SosVhd
+    throw 'Nao achei o Windows dentro do disco da VM.'
+}
+function Close-SosVhd {
+    if (-not $script:SosVhd) { return }
+    Write-Host 'Fechando o disco da VM...'
+    Close-SosHives
+    foreach ($l in @($script:SosVhdLetters)) {
+        try { Get-Partition -DriveLetter $l -EA Stop | Remove-PartitionAccessPath -AccessPath ($l + ':\') -EA Stop } catch {}
+        cmd.exe /c ('mountvol ' + $l + ': /D >nul 2>&1')
+    }
+    Dismount-VHD -Path $script:SosVhd -EA SilentlyContinue
+    $script:SosVhd = $null
+}
+
+function Copy-SosGpuDrivers([string]$vmName, [string]$gpuId) {
+    $letter = Open-SosVhd $vmName
+    try { Copy-SosGpuDriversTo $letter $gpuId }
+    finally { Close-SosVhd }
 }
 
 # copia o Piece Helper (pasta $HelperSrc) para o Windows aberto na letra e cria o atalho para todos os usuarios

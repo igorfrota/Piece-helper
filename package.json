@@ -1,6 +1,6 @@
 {
   "name": "piece-helper",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "App da guilda Piece화: troca de contas e máquina virtual com placa de vídeo (Grand Chase Classic)",
   "main": "src/main.js",
   "keywords": [],
