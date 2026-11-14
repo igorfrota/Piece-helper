@@ -135,10 +135,8 @@ function createWindow() {
     if (!hidden) win.show();
     // voltou de um reinício pedido pelo "Verificar e corrigir": abre a máquina virtual e examina de novo
     if (cont) { Doctor.clearContinue(); setTimeout(() => win.webContents.send('app:continue', {}), 800); }
-    if (process.argv.includes('--atualizado')) {
-      const falhou = Updater.lastFailed();
-      setTimeout(() => win.webContents.send(falhou ? 'update:failed' : 'update:done', { version: app.getVersion() }), 900);
-    }
+    try { if (global.__pieceBoot) global.__pieceBoot.ok(); } catch { /* a versão abriu: está boa */ }
+    if (process.argv.includes('--atualizado')) setTimeout(() => win.webContents.send('update:done', { version: app.getVersion() }), 700);
   });
   win.on('close', (e) => {
     if (!quitting && settings().closeToTray) {
@@ -353,19 +351,14 @@ async function procurarAtualizacao(manual) {
 }
 handle('update:check', () => procurarAtualizacao(true));
 handle('update:state', () => Updater.state());
-handle('update:download', () => Updater.download((pct) => win?.webContents.send('update:progress', pct)));
-handle('update:install', async () => {
-  await Updater.installAndRestart(() => {
-    // fecha de verdade (nada de ficar na bandeja), senão o arquivo continua em uso e a troca não acontece
-    quitting = true;
-    setTimeout(() => {
-      try { Discord.stop(); } catch { /* */ }
-      try { if (tray) tray.destroy(); } catch { /* */ }
-      for (const w of BrowserWindow.getAllWindows()) { try { w.destroy(); } catch { /* */ } }
-      app.quit();
-      setTimeout(() => app.exit(0), 1500);
-    }, 150);
-  });
+handle('update:download', () => Updater.download((p) => win?.webContents.send('update:progress', p)));
+handle('update:install', () => {
+  // reinicia já na versão nova; fecha de verdade (nada de bandeja)
+  quitting = true;
+  setTimeout(() => Updater.restart(() => {
+    try { Discord.stop(); } catch { /* */ }
+    try { if (tray) tray.destroy(); } catch { /* */ }
+  }), 350);
   return true;
 });
 handle('update:page', () => Updater.openPage());
@@ -385,6 +378,7 @@ app.whenReady().then(() => {
   createWindow();
   // procura versão nova 10 s depois de abrir e a cada 6 horas
   if (app.isPackaged) {
+    setTimeout(() => { try { Updater.cleanup(); } catch { /* */ } }, 8000);
     setTimeout(() => procurarAtualizacao(false).catch(() => {}), 10000);
     setInterval(() => procurarAtualizacao(false).catch(() => {}), 6 * 3600 * 1000);
   }

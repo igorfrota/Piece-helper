@@ -59,7 +59,7 @@ contextBridge.exposeInMainWorld('piece', {
     close: () => ipcRenderer.send('win:close'),
   },
   on: (ch, fn) => {
-    const ok = ['accounts:changed', 'win:state', 'app:continue', 'update:available', 'update:progress', 'update:done', 'update:failed'];
+    const ok = ['accounts:changed', 'win:state', 'app:continue', 'update:available', 'update:progress', 'update:done'];
     if (ok.includes(ch)) ipcRenderer.on(ch, (_e, d) => fn(d));
   },
 });
