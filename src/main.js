@@ -7,6 +7,7 @@ const { Steam } = require('./core/steam');
 const { SnapshotPlatform, BattleNet } = require('./core/platforms');
 const VM = require('./vm/vm');
 const Doctor = require('./vm/doctor');
+const Discord = require('./core/discord');
 
 app.setAppUserModelId('guild.piece.helper');
 if (!app.requestSingleInstanceLock()) { app.quit(); }
@@ -34,7 +35,8 @@ const DEFAULT_SETTINGS = {
   launchGameDefault: false,
   closeToTray: true,
   startMinimized: false,
-  startWithWindows: false,
+  startWithWindows: true,
+  discordPresence: true,
   enabled: { steam: true, riot: false, ubisoft: false, battlenet: false },
   paths: {},
   active: {},
@@ -81,7 +83,14 @@ let busy = false;
 async function guarded(fn) {
   if (busy) throw new Error('Aguarde: já existe uma troca em andamento.');
   busy = true;
-  try { return await fn(); } finally { busy = false; }
+  Discord.set('Trocando de conta…');
+  try { return await fn(); } finally { busy = false; Discord.idle(); }
+}
+
+// "Iniciar com o Windows": registra/remove o Piece Helper na inicialização (abre escondido na bandeja)
+function applyStartup() {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  try { app.setLoginItemSettings({ openAtLogin: !!settings().startWithWindows, path: process.execPath, args: ['--hidden'] }); } catch { /* */ }
 }
 
 function getPlatform(pid) {
@@ -254,9 +263,8 @@ handle('meta:set', (pid, id, patch) => {
 handle('settings:get', () => settings());
 handle('settings:set', (patch) => {
   const s = saveSettings(patch);
-  if ('startWithWindows' in patch && process.platform === 'win32') {
-    app.setLoginItemSettings({ openAtLogin: !!patch.startWithWindows, args: ['--hidden'] });
-  }
+  if ('startWithWindows' in patch) applyStartup();
+  if ('discordPresence' in patch) Discord.setEnabled(!!patch.discordPresence);
   rebuildTray();
   return s;
 });
@@ -327,8 +335,12 @@ ipcMain.on('win:close', () => win?.close());
 
 // ---------- Ciclo de vida ----------
 app.on('second-instance', (_e, argv) => { showWindow(); if ((argv || []).includes('--continuar')) { Doctor.clearContinue(); win?.webContents.send('app:continue', {}); } });
-app.on('before-quit', () => { quitting = true; });
+app.on('before-quit', () => { quitting = true; Discord.stop(); });
 app.whenReady().then(() => {
+  // 1.1: passa a iniciar com o Windows por padrão (uma vez; quem desligar depois continua desligado)
+  if (!settings().startupDefault11) saveSettings({ startWithWindows: true, startupDefault11: true });
+  applyStartup();
+  Discord.setEnabled(settings().discordPresence !== false);
   createWindow();
   tray = new Tray(nativeImage.createFromPath(path.join(ASSETS, 'tray.png')));
   tray.setToolTip('Piece Helper');
