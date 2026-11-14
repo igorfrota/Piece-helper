@@ -48,7 +48,10 @@
     if (a === 'ver') return novidades();
     if (a === 'fechar' || a === 'depois') { escondido = U.version; return card(); }
     if (a === 'pagina') return P.update.page();
-    if (a === 'reabrir') { const r = await P.update.install(); if (!r.ok) { fase = 'erro'; erro = r.error; card(); } return; }
+    if (a === 'reabrir') {
+      const b = document.querySelector('#updCard [data-u="reabrir"]'); if (b) { b.disabled = true; b.textContent = 'Fechando…'; }
+      const r = await P.update.install(); if (!r.ok) { fase = 'erro'; erro = r.error; card(); } return;
+    }
     if (a === 'go') {
       if (!U.auto) { P.update.page(); return; }
       fase = 'baixando'; pct = 0; card();
@@ -61,6 +64,7 @@
   P.on('update:available', (u) => { U = u; if (fase !== 'baixando' && fase !== 'pronto') fase = 'novo'; escondido = ''; card(); });
   P.on('update:progress', (n) => { pct = n; const i = document.querySelector('#updCard .upd-bar i'); if (i) i.style.width = n + '%'; });
   P.on('update:done', (d) => { if (typeof toast === 'function') toast(`Piece Helper atualizado para a versão ${d.version}.`); });
+  P.on('update:failed', () => { if (typeof toast === 'function') toast('A atualização não conseguiu trocar o arquivo. Baixe o .zip novo pelo site da guilda e extraia por cima.', 'warn', 9000); });
 
   // Configurações: versão atual + "Procurar agora"
   async function painel() {

@@ -82,56 +82,87 @@ async function download(onProgress) {
   try { return await downloading; } finally { downloading = null; }
 }
 
-// troca o app.asar depois que o Piece Helper fechar e abre de novo
-function installAndRestart(quit) {
+// troca o app.asar depois que o Piece Helper fechar e abre de novo.
+// O script NÃO pode ser filho direto do app: no Windows ele herdaria o app.asar aberto e a troca nunca
+// conseguiria substituir o arquivo. Por isso quem cria o script é o WMI (Win32_Process.Create), sem herança.
+// O script também encerra à força qualquer Piece Helper que sobrar antes de trocar.
+async function installAndRestart(quit) {
   if (!ready) throw new Error('A atualização ainda não foi baixada.');
   const res = resDir();
-  const script = path.join(os.tmpdir(), `piece-helper-update-${Date.now()}.cmd`);
   const exe = process.execPath;
+  const exeName = path.basename(exe);
+  const stamp = Date.now();
+  const script = path.join(os.tmpdir(), `piece-helper-update-${stamp}.cmd`);
   const lines = [
     '@echo off',
     'chcp 65001 >nul',
     'setlocal',
     `set "P=${process.pid}"`,
+    `set "R=${res}"`,
     'set /a N=0',
     ':wait',
-    'tasklist /FI "PID eq %P%" 2>nul | find "%P%" >nul',
+    'tasklist /FI "PID eq %P%" /NH 2>nul | find " %P% " >nul',
     'if errorlevel 1 goto go',
     'set /a N+=1',
-    'if %N% GEQ 60 goto go',
+    'if %N% GEQ 15 goto go',
     'ping -n 2 127.0.0.1 >nul',
     'goto wait',
     ':go',
-    'ping -n 3 127.0.0.1 >nul',
-    `copy /y "${path.join(res, 'app.asar')}" "${path.join(res, 'app-old.asar')}" >nul`,
+    `taskkill /f /im "${exeName}" >nul 2>&1`,
+    'ping -n 2 127.0.0.1 >nul',
+    'copy /y "%R%\\app.asar" "%R%\\app-old.asar" >nul',
     'set /a T=0',
     ':mv',
-    `move /y "${ready}" "${path.join(res, 'app.asar')}" >nul`,
+    'move /y "%R%\\app-update.asar" "%R%\\app.asar" >nul',
     'if not errorlevel 1 goto ok',
     'set /a T+=1',
-    'if %T% GEQ 60 goto ok',
+    'if %T% GEQ 30 goto fail',
+    `taskkill /f /im "${exeName}" >nul 2>&1`,
     'ping -n 2 127.0.0.1 >nul',
     'goto mv',
+    ':fail',
+    'echo falhou> "%R%\\update-falhou.txt"',
     ':ok',
     `start "" "${exe}" --atualizado`,
     'del "%~f0"',
   ];
   ofs.writeFileSync(script, lines.join('\r\n'), 'utf8');
-  // roda o .cmd sem janela nenhuma: o wscript não abre console (o "detached" do Node abria uma janela preta)
+  // roda o .cmd escondido (wscript não abre console)
   const vbs = script.replace(/\.cmd$/, '.vbs');
   const q = '""';
-  ofs.writeFileSync(vbs, [
+  ofs.writeFileSync(vbs, '﻿' + [
     `CreateObject("WScript.Shell").Run "cmd /c ${q}${script}${q}", 0, False`,
     'CreateObject("Scripting.FileSystemObject").DeleteFile WScript.ScriptFullName',
-  ].join('\r\n').replace(/^/, '\ufeff'), 'utf16le'); // Unicode: funciona com acentos no caminho
-  spawn('wscript.exe', [vbs], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  ].join('\r\n'), 'utf16le');
+  const cmdLine = `wscript.exe "${vbs}"`.replace(/'/g, "''");
+  const ps = `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${cmdLine}' }; exit [int]$r.ReturnValue`;
+  const okWmi = await new Promise((resolve) => {
+    let done = false;
+    const fin = (v) => { if (!done) { done = true; resolve(v); } };
+    try {
+      const c = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-Command', ps], { stdio: 'ignore', windowsHide: true });
+      c.on('exit', (code) => fin(code === 0));
+      c.on('error', () => fin(false));
+      setTimeout(() => fin(false), 20000);
+    } catch { fin(false); }
+  });
+  // plano B: inicia direto (o script encerra o Piece Helper à força, o que também solta o arquivo)
+  if (!okWmi) spawn('wscript.exe', [vbs], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
   quit();
+}
+
+// se a última troca não deu certo, avisa uma vez
+function lastFailed() {
+  const f = path.join(resDir(), 'update-falhou.txt');
+  try { if (ofs.existsSync(f)) { ofs.unlinkSync(f); return true; } } catch { /* */ }
+  return false;
 }
 
 module.exports = {
   check,
   download,
   installAndRestart,
+  lastFailed,
   openPage: () => shell.openExternal(found ? found.page : PAGE),
   state: () => ({ current: app.getVersion(), update: found ? { ...found, auto: !!found.asar && app.isPackaged } : null, ready: !!ready }),
 };
