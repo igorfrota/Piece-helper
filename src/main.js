@@ -351,7 +351,20 @@ async function procurarAtualizacao(manual) {
 handle('update:check', () => procurarAtualizacao(true));
 handle('update:state', () => Updater.state());
 handle('update:download', () => Updater.download((pct) => win?.webContents.send('update:progress', pct)));
-handle('update:install', () => { Updater.installAndRestart(() => { quitting = true; app.quit(); }); return true; });
+handle('update:install', () => {
+  Updater.installAndRestart(() => {
+    // fecha de verdade (nada de ficar na bandeja), senão o arquivo continua em uso e a troca não acontece
+    quitting = true;
+    setTimeout(() => {
+      try { Discord.stop(); } catch { /* */ }
+      try { if (tray) tray.destroy(); } catch { /* */ }
+      for (const w of BrowserWindow.getAllWindows()) { try { w.destroy(); } catch { /* */ } }
+      app.quit();
+      setTimeout(() => app.exit(0), 1500);
+    }, 150);
+  });
+  return true;
+});
 handle('update:page', () => Updater.openPage());
 
 ipcMain.on('win:min', () => win?.minimize());
