@@ -297,6 +297,7 @@ handle('vm:manager', () => VM.openManager());
 handle('vm:installHelper', (name) => VM.installHelper(name));
 handle('vm:hypervEnable', () => VM.hypervEnable());
 handle('vm:isoInfo', async () => VM.isoInfo(await steamPath()));
+handle('vm:drives', () => VM.drives());
 handle('vm:pickIso', async () => {
   const r = await dialog.showOpenDialog(win, { title: 'Escolha a ISO do Windows', properties: ['openFile'], filters: [{ name: 'Imagem do Windows', extensions: ['iso'] }] });
   return r.canceled ? null : r.filePaths[0];

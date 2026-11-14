@@ -498,3 +498,26 @@ h1 { margin: 4px 0 0; display: flex; align-items: center; gap: 12px; font-size: 
 .upd-ico svg, .upd-x svg, .upd-acts .btn svg, .modal-actions .btn svg { stroke: currentColor; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .modal-actions .btn svg { width: 15px; height: 15px; stroke-width: 2.2; }
 .upd-step small:not(:has(.upd-bar)) { display: block; }
+
+/* onde instalar a VM */
+.drv-list { display: grid; gap: 8px; }
+.drv-loading { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; padding: 10px 2px; }
+.drv { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--line); background: rgba(148, 163, 184, .04); color: var(--text); transition: border-color .15s, background .15s; }
+.drv:hover:not(:disabled) { border-color: var(--line2); background: rgba(148, 163, 184, .08); }
+.drv.on { border-color: rgba(52, 211, 153, .6); background: rgba(16, 185, 129, .08); box-shadow: 0 0 0 1px rgba(16, 185, 129, .15); }
+.drv:disabled { opacity: .5; cursor: not-allowed; }
+.drv-l { flex: none; width: 42px; height: 42px; border-radius: 11px; display: grid; place-items: center; font-weight: 800; font-size: 15px; background: var(--panel2); border: 1px solid var(--line2); }
+.drv.on .drv-l { color: var(--em2); border-color: rgba(52, 211, 153, .4); }
+.drv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.drv-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.drv-top b { font-size: 13.5px; font-weight: 600; }
+.drv-tag { font-style: normal; font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 99px; background: rgba(148, 163, 184, .12); color: var(--muted); }
+.drv-tag.ssd { background: rgba(56, 189, 248, .13); color: #7dd3fc; }
+.drv-tag.rec { background: rgba(16, 185, 129, .16); color: var(--em2); }
+.drv-bar { height: 5px; border-radius: 99px; background: rgba(148, 163, 184, .15); overflow: hidden; }
+.drv-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #64748b, #94a3b8); }
+.drv.on .drv-bar i { background: linear-gradient(90deg, var(--em), var(--em2)); }
+.drv-main small { color: var(--muted); font-size: 12px; }
+.drv-check { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line2); display: grid; place-items: center; color: transparent; }
+.drv.on .drv-check { background: var(--em); border-color: transparent; color: #04281c; }
+.drv-check svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 3; }

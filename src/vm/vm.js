@@ -526,8 +526,50 @@ async function precheck(opts, steamPath) {
 const CREATE_STEPS = ['Conferir o PC e escolher o disco', 'Baixar o Windows', 'Preparar o disco da VM', 'Copiar o Windows para a VM',
   'Ajustes, drivers, Steam e jogos', 'Criar e ligar a VM'];
 
-// escolhe onde guardar o disco da VM (e a ISO): o disco padrão do Hyper-V se couber, senão o disco com mais espaço
-async function pickStorage(j, needGb) {
+// discos do PC para a tela "Onde instalar a VM": espaço, tipo (SSD/HD, NVMe, USB) e qual é o do Windows
+async function drives() {
+  const d = (await psJson(`
+$hv = $null; try { $hv = (Get-VMHost -EA Stop).VirtualHardDiskPath } catch {}
+$sys = $env:SystemDrive.Substring(0, 1)
+$list = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object {
+    $L = $_.DeviceID.Substring(0, 1); $media = ''; $bus = ''
+    try {
+        $dn = (Get-Partition -DriveLetter $L -EA Stop | Select-Object -First 1).DiskNumber
+        $pd = Get-PhysicalDisk -EA Stop | Where-Object { $_.DeviceId -eq [string]$dn } | Select-Object -First 1
+        if ($pd) { $media = [string]$pd.MediaType; $bus = [string]$pd.BusType }
+    } catch {}
+    [ordered]@{ letter = $L; label = [string]$_.VolumeName; free = [int64]$_.FreeSpace; size = [int64]$_.Size; fs = [string]$_.FileSystem; media = $media; bus = $bus; system = ($L -eq $sys) }
+})
+[ordered]@{ drives = $list; hv = $hv } | ConvertTo-Json -Depth 4 -Compress
+`, 60000)) || {};
+  return {
+    hv: d.hv || '',
+    drives: asList(d.drives).filter((x) => x && x.letter).map((x) => ({
+      letter: String(x.letter).toUpperCase(), label: x.label || '', free: +x.free || 0, size: +x.size || 0, fs: x.fs || '',
+      ssd: /ssd/i.test(x.media || '') || /nvme/i.test(x.bus || ''), hdd: /hdd/i.test(x.media || ''), nvme: /nvme/i.test(x.bus || ''),
+      usb: /usb/i.test(x.bus || ''), system: !!x.system, ok: /^(ntfs|refs)$/i.test(x.fs || ''),
+    })),
+  };
+}
+
+// escolhe onde guardar o disco da VM (e a ISO): o disco que a pessoa escolheu; sem escolha, o disco padrão
+// do Hyper-V se couber, senão o disco com mais espaço
+async function pickStorage(j, needGb, chosen) {
+  if (chosen) {
+    const L = String(chosen).slice(0, 1).toUpperCase();
+    const info = await drives();
+    const dv = info.drives.find((x) => x.letter === L);
+    if (!dv) throw new Error(`O disco ${L}: não foi encontrado. Escolha outro disco na criação da VM.`);
+    if (!dv.ok) throw new Error(`O disco ${L}: está em ${dv.fs || 'um formato desconhecido'}; a VM precisa de um disco NTFS.`);
+    if (dv.free / GB < needGb) throw new Error(`O disco ${L}: tem ${Math.floor(dv.free / GB)} GB livres e a VM precisa de uns ${Math.ceil(needGb)} GB. Escolha outro disco ou libere espaço.`);
+    const vmDir = `${L}:\\Piece Helper\\VMs`;
+    j.log(`A VM vai ficar no disco ${L}: escolhido (${Math.floor(dv.free / GB)} GB livres): ${vmDir}`);
+    return { vhdDir: `${vmDir}\\Discos`, vmDir, isoDir: L !== 'C' ? `${L}:\\Piece Helper\\ISO` : null };
+  }
+  return pickStorageAuto(j, needGb);
+}
+
+async function pickStorageAuto(j, needGb) {
   const d = (await psJson(ps('diag'), 120000)) || {};
   const drives = asList(d.drives).filter((x) => x && x.letter);
   const defDir = d.vhdDir || 'C:\\ProgramData\\Microsoft\\Windows\\Virtual Hard Disks';
@@ -567,7 +609,7 @@ async function createRun(j, o) {
   j.log(`Criando a VM "${name}".`, 'title');
   let games = o._games || [];
   const gamesGb = games.reduce((a, x) => a + (x.size || 0), 0) / GB;
-  const store = await pickStorage(j, 32 + gamesGb * 1.08 + (o.iso ? 0 : 0));
+  const store = await pickStorage(j, 32 + gamesGb * 1.08 + (o.iso ? 0 : 0), o.drive || null);
   j.setStep(1);
   let iso = o.iso;
   if (!iso) iso = await getWindowsIso(j, parseInt(o.win, 10), store.isoDir);
@@ -638,4 +680,4 @@ module.exports = {
   _int: { startJob, runScript, psJson, ps, dirs, download, loadState, saveState, GB, asList, steamGames, status, findVm, gpuUpdateRun, gpuSetupRun,
     createRun, resolveGames, gameBuild, isAdmin, IS_WIN, recommend, vdfValues, jobs, helperDir: () => HELPER_DIR, dataDir: () => DATA },
   init, isAdmin, installHelper, helperAvailable, status, gpuSetup, gpuUpdate, gpuRemove, tune, tuneUndo, power, hypervEnable, openWindow, openManager,
-  create, precheck, isoInfo, pollJob, cancelJob, _test: { unattendXml, validate, computerName, msLanguage, vdfValues, recommend } };
+  create, precheck, isoInfo, drives, pollJob, cancelJob, _test: { unattendXml, validate, computerName, msLanguage, vdfValues, recommend } };

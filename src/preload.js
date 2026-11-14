@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('piece', {
     hypervEnable: () => call('vm:hypervEnable'),
     reboot: () => call('vm:reboot'),
     isoInfo: () => call('vm:isoInfo'),
+    drives: () => call('vm:drives'),
     pickIso: () => call('vm:pickIso'),
     create: (opts) => call('vm:create', opts),
     diagnose: () => call('vm:diagnose'),
