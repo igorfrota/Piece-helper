@@ -30,7 +30,7 @@ jobs:
         if: steps.ver.outputs.skip != '1'
         run: |
           mkdir -p out/app
-          cp -r src assets package.json LEIA-ME.txt out/app/
+          cp -r src assets package.json LEIA-ME.txt loader.js out/app/
           npx -y @electron/asar@3 pack out/app out/app.asar
       - name: Monta o .zip completo
         if: steps.ver.outputs.skip != '1'
