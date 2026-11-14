@@ -11,6 +11,7 @@ const ICON = {
   dots: '<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>',
   play: '<svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z" fill="currentColor"/></svg>',
   swap: '<svg viewBox="0 0 24 24"><path d="M7 7h13l-4-4M17 17H4l4 4"/></svg>',
+  check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg>',
   edit: '<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>',
   save: '<svg viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7M8 21v-7h8v7"/></svg>',
@@ -145,28 +146,29 @@ function renderGrid() {
     const sub = m.nick ? `${a.display}${a.login && a.login !== a.display ? ' • ' + a.login : ''}` : (a.login && a.login !== a.display ? a.login : '');
     const avatar = a.avatar ? `<img src="${a.avatar}" alt="">` : `<div class="hex">${esc(initials(name))}</div>`;
     const tags = [
-      a.current ? '<span class="tag cur">ATUAL</span>' : '',
       m.char ? `<span class="tag char">${esc(m.char)}</span>` : '',
-      a.offline ? '<span class="tag off">modo offline</span>' : '',
+      a.offline ? '<span class="tag off">offline</span>' : '',
       presenceTag(a),
     ].join('');
     const used = m.lastUsed || a.lastLogin;
+    const line2 = [esc(sub), a.current ? '<b class="cur-txt">em uso agora</b>' : (used ? 'usada ' + ago(used) : '')].filter(Boolean).join(' · ');
+    card.title = m.note || '';
+    const goBtn = a.current && !(isSteam && gameOn)
+      ? `<button class="btn small go is-cur" title="Esta conta já está logada">${ICON.check || ''}Em uso</button>`
+      : isSteam && gameOn
+        ? `<button class="btn gold small go">${ICON.play}Jogar</button>`
+        : `<button class="btn primary small go">${ICON.swap}Trocar</button>`;
     card.innerHTML = `
-      <button class="fav ${m.fav ? 'on' : ''}" title="Favoritar">${ICON.star}</button>
-      <div class="card-top">
-        <div class="avatar">${avatar}${a.current ? '<span class="on"></span>' : ''}</div>
-        <div class="who"><div class="name" title="${esc(name)}">${esc(name)}</div><div class="login">${esc(sub) || '&nbsp;'}</div></div>
+      <div class="avatar">${avatar}${a.current ? '<span class="on"></span>' : ''}</div>
+      <div class="who">
+        <div class="name-row"><span class="name" title="${esc(name)}">${esc(name)}</span>${tags}<button class="fav ${m.fav ? 'on' : ''}" title="${m.fav ? 'Tirar dos favoritos' : 'Favoritar'}">${ICON.star}</button></div>
+        <div class="login">${line2 || '&nbsp;'}</div>
       </div>
-      <div class="tags">${tags}</div>
-      ${m.note ? `<div class="note">${esc(m.note)}</div>` : ''}
-      <div class="meta-line">${used ? 'Usada ' + ago(used) : '&nbsp;'}</div>
       <div class="card-actions">
-        ${isSteam && gameOn
-          ? `<button class="btn gold small go">${ICON.play}Jogar GC</button>`
-          : `<button class="btn primary small go">${ICON.swap}Trocar</button>`}
+        ${goBtn}
         <button class="btn ghost small icon more" title="Mais opções">${ICON.dots}</button>
       </div>`;
-    card.querySelector('.go').onclick = () => doSwitch(a);
+    card.querySelector('.go').onclick = () => { if (!card.querySelector('.go.is-cur')) doSwitch(a); };
     card.querySelector('.fav').onclick = async (e) => { e.stopPropagation(); await setMeta(a, { fav: !m.fav }); };
     card.querySelector('.more').onclick = (e) => { e.stopPropagation(); openCtx(e, a); };
     card.ondblclick = (e) => { if (!e.target.closest('button')) doSwitch(a); };

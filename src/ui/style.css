@@ -432,3 +432,31 @@ h1 { margin: 4px 0 0; display: flex; align-items: center; gap: 12px; font-size: 
 .upd-notes p { margin: 6px 0; }
 .upd-notes ul { margin: 4px 0 8px; padding-left: 18px; }
 .upd-notes b { color: var(--text); }
+
+/* ---------- cartões de conta compactos (1.1) ---------- */
+.grid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.card { flex-direction: row; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 14px; min-height: 70px; }
+.card::before { inset: 0 auto 0 0; width: 3px; height: auto; background: linear-gradient(180deg, var(--accent), transparent 90%); opacity: 0; transition: opacity .15s; }
+.card:hover::before, .card.current::before { opacity: .9; }
+.card:hover { transform: none; background: linear-gradient(180deg, color-mix(in srgb, var(--panel2) 85%, var(--accent) 6%), var(--panel)); }
+.card .avatar { width: 44px; height: 44px; }
+.card .avatar img { border-radius: 12px; border-width: 1.5px; }
+.card .avatar .hex { font-size: 16px; }
+.card .avatar .on { width: 13px; height: 13px; border-width: 2.5px; right: -3px; bottom: -3px; }
+.card .who .name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.card .who .name { font-weight: 700; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.card .who .tag { flex: none; font-size: 10.5px; padding: 2px 7px; }
+.card .who .login { font-size: 12px; margin-top: 3px; }
+.card .cur-txt { color: var(--em2); font-weight: 600; }
+.card .card-actions { margin: 0; gap: 4px; align-items: center; flex: none; }
+.card .card-actions .btn { flex: none; height: 32px; padding: 0 11px; font-size: 12.5px; border-radius: 10px; }
+.card .card-actions .btn.primary { background: rgba(16, 185, 129, .14); color: var(--em2); border: 1px solid rgba(52, 211, 153, .28); box-shadow: none; }
+.card:hover .card-actions .btn.primary, .card .card-actions .btn.primary:focus-visible { background: linear-gradient(180deg, var(--em2), var(--em)); color: #04281c; border-color: transparent; box-shadow: 0 6px 16px rgba(16, 185, 129, .3); }
+.card .card-actions .btn svg { width: 14px; height: 14px; }
+.card .card-actions .btn.icon { width: 32px; padding: 0; }
+.card .card-actions .btn.is-cur { background: rgba(16, 185, 129, .1); border: 1px solid rgba(52, 211, 153, .25); color: var(--em2); cursor: default; box-shadow: none; }
+.card .fav { position: static; flex: none; width: 22px; height: 22px; display: grid; place-items: center; padding: 0; margin-left: -2px; opacity: 0; transition: opacity .15s; }
+.card:hover .fav, .card:focus-within .fav, .card .fav.on { opacity: 1; }
+.card .fav svg { width: 14px; height: 14px; }
+.card .card-actions .more { opacity: .55; }
+.card:hover .card-actions .more { opacity: 1; }
