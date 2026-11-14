@@ -135,7 +135,10 @@ function createWindow() {
     if (!hidden) win.show();
     // voltou de um reinício pedido pelo "Verificar e corrigir": abre a máquina virtual e examina de novo
     if (cont) { Doctor.clearContinue(); setTimeout(() => win.webContents.send('app:continue', {}), 800); }
-    if (process.argv.includes('--atualizado')) setTimeout(() => win.webContents.send('update:done', { version: app.getVersion() }), 900);
+    if (process.argv.includes('--atualizado')) {
+      const falhou = Updater.lastFailed();
+      setTimeout(() => win.webContents.send(falhou ? 'update:failed' : 'update:done', { version: app.getVersion() }), 900);
+    }
   });
   win.on('close', (e) => {
     if (!quitting && settings().closeToTray) {
@@ -351,8 +354,8 @@ async function procurarAtualizacao(manual) {
 handle('update:check', () => procurarAtualizacao(true));
 handle('update:state', () => Updater.state());
 handle('update:download', () => Updater.download((pct) => win?.webContents.send('update:progress', pct)));
-handle('update:install', () => {
-  Updater.installAndRestart(() => {
+handle('update:install', async () => {
+  await Updater.installAndRestart(() => {
     // fecha de verdade (nada de ficar na bandeja), senão o arquivo continua em uso e a troca não acontece
     quitting = true;
     setTimeout(() => {
