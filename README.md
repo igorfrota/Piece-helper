@@ -28,7 +28,7 @@ O app não guarda senhas: só troca os arquivos de sessão que os próprios laun
 
 1. Mude `version` no `package.json` (ex.: `1.2.0`).
 2. Escreva as novidades em `notas/v1.2.0.md`.
-3. Envie a tag `v1.2.0` para o GitHub (`git tag v1.2.0 && git push origin v1.2.0`).
+3. Leve para a `main`.
 
 O GitHub Actions monta o `.zip` e o `app.asar` e publica a release. Quem já tem o Piece Helper 1.1 ou mais novo recebe o aviso no app e atualiza com um clique; o site da guilda passa a oferecer o `.zip` novo sozinho.
 
