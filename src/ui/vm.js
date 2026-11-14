@@ -465,6 +465,8 @@ const VMUI = (() => {
         <div class="field"><label>Disco GB</label><input type="number" id="wzDisk" min="64" max="2000" value="100"></div>
       </div>
       <div class="hint">Recomendado para o seu PC: ${cpus} processadores e ${ram} GB. O disco cresce aos poucos: o número é o máximo, não o que ocupa no começo.</div>
+      <div class="field"><label>Onde instalar a VM</label><div class="drv-list" id="wzDrives"><div class="drv-loading"><span class="spin" style="width:14px;height:14px"></span>Procurando os discos do PC…</div></div></div>
+      <div class="hint" id="wzDrvHint"></div>
       <div class="field"><label>Placa de vídeo</label><select id="wzGpu">${share.map((g) => `<option value="${esc(g.id)}" ${g.id === r.default_gpu ? 'selected' : ''}>${esc(g.name)}${g.integrated ? ' (vídeo integrado)' : ''}</option>`).join('')}<option value="" ${share.length ? '' : 'selected'}>Sem placa de vídeo</option></select></div>
       <label class="checkline"><input type="checkbox" id="wzSteam" checked><div><b>Instalar a Steam</b><small>Ela se instala sozinha no primeiro início da VM e abre para você entrar com a sua conta.</small></div></label>
       ${info.games.length ? `<div class="field" id="wzGamesBox" style="margin:4px 0 6px 26px"><label>Copiar jogos da Steam deste PC (não precisa baixar de novo)</label>
@@ -496,6 +498,46 @@ const VMUI = (() => {
     g$('#wzLiteMore').onclick = (e) => { e.preventDefault(); g$('#wzLiteList').hidden = !g$('#wzLiteList').hidden; };
     gAll('[data-game]').forEach((x) => (x.onchange = fitDisk));
     g$('#wzSteam').onchange = () => { const box = g$('#wzGamesBox'); if (box) box.style.opacity = g$('#wzSteam').checked ? 1 : 0.45; gAll('[data-game]').forEach((x) => (x.disabled = !g$('#wzSteam').checked)); };
+    // ---- onde instalar: lista os discos, recomenda o melhor e deixa escolher
+    let discos = null;
+    const precisa = () => {
+      const jogos = info.games.filter((g) => picked().includes(g.appid)).reduce((a, g) => a + g.size, 0) / GB;
+      const baixa = st.win !== 'iso' && !info.isos.find((x) => x.name.startsWith(`Win${st.win}_`) && x.size > 3 * GB);
+      return Math.ceil(32 + (g$('#wzSteam').checked ? jogos * 1.08 : 0) + (baixa ? 7 : 0));
+    };
+    const tam = (b) => (b >= 1024 ** 4 ? `${(b / 1024 ** 4).toFixed(1).replace('.', ',')} TB` : gb(b));
+    const tipo = (d) => (d.usb ? 'USB' : d.nvme ? 'SSD NVMe' : d.ssd ? 'SSD' : d.hdd ? 'HD' : '');
+    const recomendado = (need) => {
+      const ok = (discos || []).filter((d) => d.ok && d.free / GB >= need + 10 && !d.usb);
+      const ssd = ok.filter((d) => d.ssd);
+      return (ssd.length ? ssd : ok).sort((a, b) => b.free - a.free)[0] || null;
+    };
+    const pintaDiscos = () => {
+      const box = g$('#wzDrives');
+      if (!discos) return;
+      if (!discos.length) { box.innerHTML = '<div class="fine">Não consegui listar os discos; o Piece Helper escolhe sozinho o que tiver mais espaço.</div>'; return; }
+      const need = precisa(), rec = recomendado(need);
+      if (!st.drive || !discos.find((d) => d.letter === st.drive && d.ok && d.free / GB >= need)) st.drive = rec ? rec.letter : null;
+      box.innerHTML = discos.map((d) => {
+        const livre = d.free / GB, usado = d.size ? Math.round((1 - d.free / d.size) * 100) : 0;
+        const motivo = !d.ok ? `Formato ${esc(d.fs || '?')} (precisa ser NTFS)` : livre < need ? `Pouco espaço (precisa de ~${need} GB)` : '';
+        const nome = d.system ? 'Disco do Windows' : (d.label || 'Disco local');
+        return `<button type="button" class="drv ${st.drive === d.letter ? 'on' : ''}" data-drv="${esc(d.letter)}" ${motivo ? 'disabled' : ''}>
+          <span class="drv-l">${esc(d.letter)}:</span>
+          <span class="drv-main"><span class="drv-top"><b>${esc(nome)}</b>${tipo(d) ? `<i class="drv-tag ${d.ssd ? 'ssd' : ''}">${tipo(d)}</i>` : ''}${rec && rec.letter === d.letter ? '<i class="drv-tag rec">Recomendado</i>' : ''}</span>
+            <span class="drv-bar"><i style="width:${usado}%"></i></span>
+            <small>${motivo || `${tam(d.free)} livres de ${tam(d.size)}`}</small></span>
+          <span class="drv-check">${SVG.ok}</span></button>`;
+      }).join('');
+      gAll('[data-drv]').forEach((b) => (b.onclick = () => { st.drive = b.dataset.drv; pintaDiscos(); }));
+      const sel = discos.find((d) => d.letter === st.drive);
+      g$('#wzDrvHint').innerHTML = !sel ? 'Nenhum disco tem espaço suficiente. Libere espaço (o <b>Verificar e corrigir</b> ajuda) ou escolha jogos menores.'
+        : `A VM vai para <b>${esc(sel.letter)}:\\Piece Helper\\VMs</b> e ocupa uns ${need} GB no começo (cresce conforme o uso).${sel.usb ? ' Disco USB: a VM só funciona com ele ligado.' : ''}${sel.hdd ? ' Em HD a VM fica mais lenta que em SSD.' : ''}`;
+    };
+    call(V.drives()).then((r) => { discos = r.drives; pintaDiscos(); }).catch(() => { discos = []; pintaDiscos(); });
+    gAll('[data-game]').forEach((x) => x.addEventListener('change', pintaDiscos));
+    g$('#wzSteam').addEventListener('change', pintaDiscos);
+    gAll('[data-win]').forEach((b) => b.addEventListener('click', pintaDiscos));
     paint(); fitDisk();
     g$('#wzGo').onclick = async () => {
       if (st.win === 'iso' && !st.iso) return toast('Escolha o arquivo da ISO.', 'warn');
@@ -506,7 +548,9 @@ const VMUI = (() => {
         cpus: +g$('#wzCpus').value, ram_gb: +g$('#wzRam').value, disk_gb: +g$('#wzDisk').value,
         gpu_id: g$('#wzGpu').value || null, start: g$('#wzStart').checked, lite: g$('#wzLite').checked,
         steam, games: steam ? picked() : [], helper: g$('#wzHelper') ? g$('#wzHelper').checked : false,
+        drive: st.drive || null,
       };
+      if (discos && discos.length && !st.drive) return toast('Nenhum disco tem espaço suficiente para a VM.', 'warn');
       const b = g$('#wzGo'); b.disabled = true; b.textContent = 'Conferindo…';
       let id;
       try { id = await call(V.create(opts)); } catch (e) { b.disabled = false; b.textContent = 'Criar a VM'; return toast(e.message, 'err', 6000); }
