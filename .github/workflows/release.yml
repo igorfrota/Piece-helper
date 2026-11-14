@@ -1,0 +1,47 @@
+# Publica uma versão nova sozinho: basta mudar a versão no package.json, escrever notas/vX.Y.Z.md
+# e enviar a tag vX.Y.Z. Monta o app.asar (usado pela atualização automática dentro do app) e o .zip
+# completo, reaproveitando o Electron do pacote anterior.
+name: Publicar versão
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Confere a versão
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          P=$(node -p "require('./package.json').version")
+          if [ "$V" != "$P" ]; then echo "::error::A tag ($V) não bate com o package.json ($P)"; exit 1; fi
+          echo "V=$V" >> "$GITHUB_ENV"
+      - name: Monta o app.asar
+        run: |
+          mkdir -p out/app
+          cp -r src assets package.json LEIA-ME.txt out/app/
+          npx -y @electron/asar@3 pack out/app out/app.asar
+      - name: Monta o .zip completo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          URL=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '[.assets[] | select(.name | endswith(".zip"))][0].browser_download_url')
+          curl -sSL "$URL" -o out/anterior.zip
+          mkdir -p out/pkg && cd out/pkg && unzip -q ../anterior.zip
+          cp ../app.asar "Piece Helper/resources/app.asar"
+          cp ../../LEIA-ME.txt "Piece Helper/LEIA-ME.txt"
+          rm -f "Piece Helper/resources/app-update.asar" "Piece Helper/resources/app-old.asar"
+          zip -qr "../PieceHelper-v${V}-win64.zip" "Piece Helper"
+      - name: Publica a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTAS="notas/v${V}.md"
+          [ -f "$NOTAS" ] || { echo "Melhorias e correções." > out/notas.md; NOTAS=out/notas.md; }
+          gh release create "$GITHUB_REF_NAME" "out/PieceHelper-v${V}-win64.zip" out/app.asar \
+            --title "Piece Helper ${V}" --notes-file "$NOTAS"

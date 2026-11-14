@@ -21,6 +21,13 @@ contextBridge.exposeInMainWorld('piece', {
   showItem: (p) => call('shell:showItem', p),
   openUrl: (u) => call('shell:openUrl', u),
   elevate: () => call('app:elevate'),
+  update: {
+    check: () => call('update:check'),
+    state: () => call('update:state'),
+    download: () => call('update:download'),
+    install: () => call('update:install'),
+    page: () => call('update:page'),
+  },
   vm: {
     status: () => call('vm:status'),
     gpuSetup: (name, gpuId) => call('vm:gpuSetup', name, gpuId),
@@ -52,7 +59,7 @@ contextBridge.exposeInMainWorld('piece', {
     close: () => ipcRenderer.send('win:close'),
   },
   on: (ch, fn) => {
-    const ok = ['accounts:changed', 'win:state', 'app:continue'];
+    const ok = ['accounts:changed', 'win:state', 'app:continue', 'update:available', 'update:progress', 'update:done'];
     if (ok.includes(ch)) ipcRenderer.on(ch, (_e, d) => fn(d));
   },
 });
