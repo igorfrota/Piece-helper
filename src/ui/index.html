@@ -95,6 +95,11 @@
           <label class="row-toggle"><div><b>Iniciar minimizado</b><small>Quando abrir, já vai direto para a bandeja.</small></div><input type="checkbox" class="switch" data-set="startMinimized"></label>
         </div>
         <div class="panel">
+          <h2>Atualizações</h2>
+          <label class="row-toggle"><div><b>Avisar quando sair versão nova</b><small>O Piece Helper confere sozinho e atualiza com um clique, sem baixar nada manualmente.</small></div><input type="checkbox" class="switch" data-set="autoUpdate"></label>
+          <div class="row-path"><div><b>Versão</b><small id="updLine">…</small></div><div><button class="btn small ghost" id="updCheck">Procurar agora</button></div></div>
+        </div>
+        <div class="panel">
           <h2>Steam / Grand Chase</h2>
           <label class="row-toggle"><div><b>Abrir o Grand Chase ao trocar (padrão)</b><small>Depois de logar, a Steam já inicia o GrandChase Classic.</small></div><input type="checkbox" class="switch" data-set="launchGameDefault"></label>
           <label class="row-toggle"><div><b>Entrar offline (padrão)</b><small>A Steam entra em modo offline. O GC precisa estar online para jogar.</small></div><input type="checkbox" class="switch" data-set="steamOffline"></label>
@@ -146,5 +151,6 @@
 <div class="toasts" id="toasts"></div>
 <script src="app.js"></script>
 <script src="vm.js"></script>
+<script src="update.js"></script>
 </body>
 </html>

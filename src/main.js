@@ -1,5 +1,5 @@
 // Piece Helper — processo principal (Electron). Troca de contas + máquina virtual com placa de vídeo.
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, shell, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const U = require('./core/util');
@@ -8,6 +8,7 @@ const { SnapshotPlatform, BattleNet } = require('./core/platforms');
 const VM = require('./vm/vm');
 const Doctor = require('./vm/doctor');
 const Discord = require('./core/discord');
+const Updater = require('./core/updater');
 
 app.setAppUserModelId('guild.piece.helper');
 if (!app.requestSingleInstanceLock()) { app.quit(); }
@@ -37,6 +38,7 @@ const DEFAULT_SETTINGS = {
   startMinimized: false,
   startWithWindows: true,
   discordPresence: true,
+  autoUpdate: true,
   enabled: { steam: true, riot: false, ubisoft: false, battlenet: false },
   paths: {},
   active: {},
@@ -133,6 +135,7 @@ function createWindow() {
     if (!hidden) win.show();
     // voltou de um reinício pedido pelo "Verificar e corrigir": abre a máquina virtual e examina de novo
     if (cont) { Doctor.clearContinue(); setTimeout(() => win.webContents.send('app:continue', {}), 800); }
+    if (process.argv.includes('--atualizado')) setTimeout(() => win.webContents.send('update:done', { version: app.getVersion() }), 900);
   });
   win.on('close', (e) => {
     if (!quitting && settings().closeToTray) {
@@ -329,6 +332,28 @@ handle('app:elevate', async () => {
   return true;
 });
 
+// ---------- Atualização automática ----------
+let avisado = '';
+async function procurarAtualizacao(manual) {
+  if (!manual && settings().autoUpdate === false) return null;
+  const r = await Updater.check();
+  if (r.update && r.update.version !== avisado) {
+    avisado = r.update.version;
+    win?.webContents.send('update:available', r.update);
+    if (!manual && win && !win.isVisible() && Notification.isSupported()) {
+      const n = new Notification({ title: `Piece Helper ${r.update.version} disponível`, body: 'Clique para ver as novidades e atualizar.', icon: path.join(ASSETS, 'icon.png') });
+      n.on('click', () => { showWindow(); win?.webContents.send('update:available', r.update); });
+      n.show();
+    }
+  }
+  return r;
+}
+handle('update:check', () => procurarAtualizacao(true));
+handle('update:state', () => Updater.state());
+handle('update:download', () => Updater.download((pct) => win?.webContents.send('update:progress', pct)));
+handle('update:install', () => { Updater.installAndRestart(() => { quitting = true; app.quit(); }); return true; });
+handle('update:page', () => Updater.openPage());
+
 ipcMain.on('win:min', () => win?.minimize());
 ipcMain.on('win:max', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()));
 ipcMain.on('win:close', () => win?.close());
@@ -342,6 +367,11 @@ app.whenReady().then(() => {
   applyStartup();
   Discord.setEnabled(settings().discordPresence !== false);
   createWindow();
+  // procura versão nova 10 s depois de abrir e a cada 6 horas
+  if (app.isPackaged) {
+    setTimeout(() => procurarAtualizacao(false).catch(() => {}), 10000);
+    setInterval(() => procurarAtualizacao(false).catch(() => {}), 6 * 3600 * 1000);
+  }
   tray = new Tray(nativeImage.createFromPath(path.join(ASSETS, 'tray.png')));
   tray.setToolTip('Piece Helper');
   tray.on('click', showWindow);
