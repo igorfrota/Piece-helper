@@ -77,8 +77,10 @@ if ($o.module -and $svc -and $svc.Status -eq 'Running') {
             checkpoint = $_.CheckpointType.ToString(); autockpt = [bool]$_.AutomaticCheckpointsEnabled;
             snaps = @(Get-VMSnapshot -VMName $_.Name -EA SilentlyContinue).Count;
             vhd = $(if ($hd) { $hd.Path } else { $null }); vhdSize = $vhdSize; vhdFile = $vhdFile;
-            net = [bool](Get-VMNetworkAdapter -VMName $_.Name | Where-Object { $_.SwitchName } | Select-Object -First 1) }
+            net = [bool](Get-VMNetworkAdapter -VMName $_.Name | Where-Object { $_.SwitchName } | Select-Object -First 1);
+            toolsOff = @(Get-VMIntegrationService -VMName $_.Name -EA SilentlyContinue | Where-Object { -not $_.Enabled } | ForEach-Object { $_.Name }) }
     })
     $o.switches = @(Get-VMSwitch -EA SilentlyContinue | ForEach-Object { $_.Name })
+    try { $o.enhanced = [bool](Get-VMHost).EnableEnhancedSessionMode } catch { $o.enhanced = $true }
 }
 $o | ConvertTo-Json -Depth 5 -Compress

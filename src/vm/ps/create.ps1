@@ -195,6 +195,7 @@ Set-VMMemory -VMName $VMName -DynamicMemoryEnabled $false -StartupBytes ([int64]
 Set-VMFirmware -VMName $VMName -EnableSecureBoot On -SecureBootTemplate 'MicrosoftWindows'
 try { Set-VMKeyProtector -VMName $VMName -NewLocalKeyProtector; Enable-VMTPM -VMName $VMName } catch { Write-Host ('Aviso (TPM): ' + $_.Exception.Message) }
 Set-VM -Name $VMName -AutomaticCheckpointsEnabled $false -AutomaticStopAction ShutDown
+Enable-SosVMTools $VMName
 if ($GpuId) { Add-SosGpuAdapter $VMName $GpuId }
 Write-Host ('VM criada: ' + $Cpus + ' processadores, ' + $RamGB + ' GB de memoria, disco de ' + $DiskGB + ' GB.')
 if ($StartVM -eq '1') { Start-VM -Name $VMName; Write-Host 'VM ligada. O primeiro inicio do Windows leva alguns minutos.' }

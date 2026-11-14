@@ -37,6 +37,15 @@ function Set-SosSteamGlFix([string]$root) {
 }
 
 
+# "ferramentas da VM" do Hyper-V: liga todos os servicos de integracao (copiar arquivos, horario,
+# desligamento, pulsacao...) e a sessao avancada (copiar/colar, tela que se ajusta, som e pen drive pela janela)
+function Enable-SosVMTools([string]$vmName) {
+    Get-VMIntegrationService -VMName $vmName -EA SilentlyContinue | Where-Object { -not $_.Enabled } | ForEach-Object {
+        try { Enable-VMIntegrationService -VMName $vmName -Name $_.Name -EA Stop; Write-Host ('Ligado na VM: ' + $_.Name) } catch {}
+    }
+    try { if (-not (Get-VMHost).EnableEnhancedSessionMode) { Set-VMHost -EnableEnhancedSessionMode $true; Write-Host 'Sessao avancada ligada (copiar/colar e tela ajustavel na janela da VM).' } } catch {}
+}
+
 function Stop-SosVM([string]$n) {
     $vm = Get-VM -Name $n
     if ($vm.State -eq 'Off') { return $false }

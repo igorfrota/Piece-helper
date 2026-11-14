@@ -3,6 +3,7 @@
 $was = Stop-SosVM $VMName
 Write-Host 'Conferindo as configuracoes da VM...'
 Set-VM -Name $VMName -AutomaticStopAction ShutDown -AutomaticCheckpointsEnabled $false
+Enable-SosVMTools $VMName
 if ($GpuId) {
     Set-VM -Name $VMName -CheckpointType Disabled
     $snaps = @(Get-VMSnapshot -VMName $VMName -EA SilentlyContinue)

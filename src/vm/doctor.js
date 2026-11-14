@@ -273,6 +273,9 @@ async function diagnose(steamPath) {
           fix: { kind: 'job', action: 'vmCheckpoint', arg: v.name, label: 'Desligar os pontos de verificação' } });
       }
     }
+    if ((v.toolsOff && v.toolsOff.length) || d.enhanced === false) add({ id: `${pre}:tools`, vm: v.name, level: 'warn', title: `${label}: ferramentas da VM desligadas`,
+      text: 'No Hyper-V as "VM Tools" já vêm no Windows, mas parte delas fica desligada. O Piece Helper liga todas: copiar e colar, tela que se ajusta ao tamanho da janela, som, enviar arquivos, horário certo e desligamento pelo PC.',
+      fix: { kind: 'job', action: 'vmTools', arg: v.name, label: 'Ligar as ferramentas da VM' } });
     if (!v.net) add({ id: `${pre}:net`, vm: v.name, level: 'warn', title: `${label}: sem internet`, text: 'A VM não está ligada a nenhuma rede. O Piece Helper liga ela na rede padrão do Hyper-V.',
       fix: { kind: 'job', action: 'vmNet', arg: v.name, label: 'Ligar a internet da VM' } });
     // Grand Chase da VM mais velho que o do PC
@@ -421,6 +424,7 @@ const VM_SCRIPTS = {
   net: "ipconfig /flushdns | Out-Null\nnetsh winhttp reset proxy | Out-Null\n'Cache de nomes (DNS) limpo e proxy do Windows zerado.'\n",
   vmCheckpoint: "Set-VM -Name $VMName -CheckpointType Disabled -AutomaticCheckpointsEnabled $false\n$s = @(Get-VMSnapshot -VMName $VMName -EA SilentlyContinue)\nif ($s.Count) { 'Juntando ' + $s.Count + ' ponto(s) de verificacao ao disco...'; $s | Remove-VMSnapshot; $t = 0; while (((Get-VM -Name $VMName).Status -match 'Merg|Mescl') -and $t -lt 1800) { Start-Sleep 3; $t += 3 } }\n'Pontos de verificacao desligados.'\n",
   vmNet: "$sw = Get-VMSwitch -Name 'Default Switch' -EA SilentlyContinue\nif (-not $sw) { $sw = Get-VMSwitch | Select-Object -First 1 }\nif (-not $sw) { throw 'Nao achei a rede padrao do Hyper-V (Default Switch). Reinicie o PC e tente de novo.' }\n$na = @(Get-VMNetworkAdapter -VMName $VMName)\nif (-not $na.Count) { Add-VMNetworkAdapter -VMName $VMName -SwitchName $sw.Name } else { Connect-VMNetworkAdapter -VMName $VMName -Name $na[0].Name -SwitchName $sw.Name }\n'Internet da VM ligada na rede ' + $sw.Name + '.'\n",
+  vmTools: "Get-VMIntegrationService -VMName $VMName | Where-Object { -not $_.Enabled } | ForEach-Object { Enable-VMIntegrationService -VMName $VMName -Name $_.Name; 'Ligado: ' + $_.Name }\nSet-VMHost -EnableEnhancedSessionMode $true\n'Ferramentas da VM ligadas. Copiar e colar e a tela ajustavel funcionam na proxima vez que abrir a janela da VM.'\n",
   vmFolder: "$root = $Letter + ':\\Piece Helper\\VMs'\nNew-Item -ItemType Directory -Force -Path ($root + '\\Discos') | Out-Null\nSet-VMHost -VirtualMachinePath $root -VirtualHardDiskPath ($root + '\\Discos')\n'As VMs novas vao ficar em ' + $root\n",
 };
 
@@ -483,7 +487,7 @@ async function runFix(j, action, arg, steamPath) {
     case 'driver': return hostDriver(j, arg);
     case 'driverWu': return (await I.runScript(j, I.ps('driver_wu'), {})).ok;
     case 'vmDrivers': j.log(`Atualizando os drivers da placa na VM ${arg}`, 'title'); return I.gpuUpdateRun(j, arg);
-    case 'vmCheckpoint': case 'vmNet': return (await I.runScript(j, VM_SCRIPTS[action], { VMName: arg })).ok;
+    case 'vmCheckpoint': case 'vmNet': case 'vmTools': return (await I.runScript(j, VM_SCRIPTS[action], { VMName: arg })).ok;
     case 'vmRepair': return vmRepair(j, arg, steamPath);
     case 'vmGame': return vmGame(j, arg, steamPath);
     case 'vmRam': return vmRam(j, arg);
@@ -492,14 +496,14 @@ async function runFix(j, action, arg, steamPath) {
 }
 const FIX_TITLES = { bios: 'Entrar na BIOS', reboot: 'Reiniciar o PC', hyperv: 'Ligar o Hyper-V', hvlaunch: 'Religar o Hyper-V', vmms: 'Ligar o serviço de VMs', net: 'Consertar a conexão',
   vmFolder: 'Mudar onde as VMs ficam', cleanup: 'Liberar espaço', driver: 'Driver da placa de vídeo', driverWu: 'Driver pelo Windows Update', vmDrivers: 'Drivers da VM',
-  vmCheckpoint: 'Pontos de verificação da VM', vmNet: 'Internet da VM', vmRepair: 'Consertar a VM', vmGame: 'Atualizar o GC da VM', vmRam: 'Memória da VM' };
+  vmCheckpoint: 'Pontos de verificação da VM', vmNet: 'Internet da VM', vmTools: 'Ferramentas da VM', vmRepair: 'Consertar a VM', vmGame: 'Atualizar o GC da VM', vmRam: 'Memória da VM' };
 
 function fix(action, arg, steamPath) {
   return I.startJob(FIX_TITLES[action] + (arg && /^vm/.test(action) ? ` (${arg})` : ''), (j) => runFix(j, action, arg, steamPath));
 }
 
 // "Resolver tudo": tudo o que não precisa reiniciar primeiro; o que reinicia fica por último (e o app volta sozinho)
-const ORDER = ['vmms', 'net', 'cleanup', 'vmFolder', 'driver', 'driverWu', 'vmRepair', 'vmDrivers', 'vmCheckpoint', 'vmNet', 'vmRam', 'vmGame', 'hvlaunch', 'hyperv', 'reboot', 'bios'];
+const ORDER = ['vmms', 'net', 'cleanup', 'vmFolder', 'driver', 'driverWu', 'vmRepair', 'vmDrivers', 'vmCheckpoint', 'vmNet', 'vmTools', 'vmRam', 'vmGame', 'hvlaunch', 'hyperv', 'reboot', 'bios'];
 function fixAll(items, steamPath) {
   const list = (items || []).filter((x) => x && x.action && ORDER.includes(x.action))
     .sort((a, b) => ORDER.indexOf(a.action) - ORDER.indexOf(b.action));
