@@ -109,7 +109,7 @@ function installAndRestart(quit) {
     `move /y "${ready}" "${path.join(res, 'app.asar')}" >nul`,
     'if not errorlevel 1 goto ok',
     'set /a T+=1',
-    'if %T% GEQ 10 goto ok',
+    'if %T% GEQ 60 goto ok',
     'ping -n 2 127.0.0.1 >nul',
     'goto mv',
     ':ok',
@@ -117,7 +117,14 @@ function installAndRestart(quit) {
     'del "%~f0"',
   ];
   ofs.writeFileSync(script, lines.join('\r\n'), 'utf8');
-  spawn('cmd.exe', ['/c', script], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  // roda o .cmd sem janela nenhuma: o wscript não abre console (o "detached" do Node abria uma janela preta)
+  const vbs = script.replace(/\.cmd$/, '.vbs');
+  const q = '""';
+  ofs.writeFileSync(vbs, [
+    `CreateObject("WScript.Shell").Run "cmd /c ${q}${script}${q}", 0, False`,
+    'CreateObject("Scripting.FileSystemObject").DeleteFile WScript.ScriptFullName',
+  ].join('\r\n').replace(/^/, '\ufeff'), 'utf16le'); // Unicode: funciona com acentos no caminho
+  spawn('wscript.exe', [vbs], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
   quit();
 }
 
