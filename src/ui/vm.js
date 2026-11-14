@@ -16,6 +16,15 @@ const VMUI = (() => {
     x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
     wrench: '<svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg>',
     doc: '<svg viewBox="0 0 24 24"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>',
+    cpu: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M10 10h4v4h-4zM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>',
+    ram: '<svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 11v2M10 11v2M14 11v2M18 11v2"/></svg>',
+    gpu: '<svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="9" cy="12" r="3"/><path d="M15 10h4M15 14h4"/></svg>',
+    dots: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>',
+    sliders: '<svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>',
+    box: '<svg viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7M12 11v10"/></svg>',
+    trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>',
+    ext: '<svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></svg>',
+    resize: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 15v5h-5M4 4l6 6M20 20l-6-6"/></svg>',
   };
   const callout = (kind, title, text) => `<div class="callout ${kind}">${SVG[kind === 'crit' ? 'warn' : kind] || SVG.info}<div><b>${esc(title)}</b>${text ? `<p>${text}</p>` : ''}</div></div>`;
   const S = { data: null, sel: null, busy: false, doc: null, docBusy: false, docStale: true };
@@ -186,7 +195,8 @@ const VMUI = (() => {
     const body = $('#vmBody');
     if (spin || !body.childElementCount) body.innerHTML = '<div class="loading"><div class="spin"></div>Procurando o Hyper-V e as máquinas virtuais…</div>';
     try { S.data = await call(V.status()); } catch (e) { body.innerHTML = callout('crit', 'Não consegui ler as máquinas virtuais', esc(e.message)); return; }
-    body.innerHTML = '<div id="vmDoctor"></div>' + render(S.data);
+    const html = render(S.data);
+    body.innerHTML = html.includes('id="vmDoctor"') ? html : '<div id="vmDoctor"></div>' + html;
     bind(S.data);
     paintJobs();
     paintDoctor();
@@ -208,28 +218,30 @@ const VMUI = (() => {
     if (!box) return;
     const d = S.doc;
     if (!d || (S.docBusy && !d.checks.length)) {
-      box.innerHTML = `<div class="panel doc"><div class="doc-head"><div class="spin"></div><div><b>Examinando o PC…</b><small>Hyper-V, BIOS, placa de vídeo e driver, espaço em disco, internet e as máquinas virtuais.</small></div></div></div>`;
+      box.innerHTML = `<div class="doc slim"><div class="spin"></div><b>Conferindo o PC e as VMs…</b><small>Hyper-V, placa de vídeo, drivers, espaço e internet.</small></div>`;
       return;
     }
     if (d.error) { box.innerHTML = callout('warn', 'Não consegui examinar o PC', esc(d.error)); return; }
     const bad = d.checks.filter((c) => c.level !== 'ok').sort((a, b) => (a.level === 'fail' ? 0 : 1) - (b.level === 'fail' ? 0 : 1));
     const good = d.checks.filter((c) => c.level === 'ok');
     const fixable = bad.filter((c) => c.fix && (c.fix.kind === 'job' || c.fix.kind === 'elevate') && !c.manual);
-    const items = bad.map((c, i) => `<li class="doc-item ${c.level}">${levelIcon(c.level)}<div class="doc-txt"><b>${esc(c.title)}</b>${c.text ? `<p>${c.text}</p>` : ''}</div>
-      ${c.fix ? `<button class="btn small ${c.level === 'fail' ? 'primary' : ''}" data-fix="${i}">${c.fix.kind === 'job' ? SVG.wrench : ''}${esc(c.fix.label)}</button>` : ''}</li>`).join('');
-    box.innerHTML = `<div class="panel doc ${bad.length ? (bad.some((c) => c.level === 'fail') ? 'has-fail' : 'has-warn') : 'all-ok'}">
-      <div class="doc-head">${levelIcon(bad.length ? (bad.some((c) => c.level === 'fail') ? 'fail' : 'warn') : 'ok')}
-        <div><b>${bad.length ? (bad.length === 1 ? '1 coisa para resolver' : `${bad.length} coisas para resolver`) : 'Tudo certo com o PC e as VMs'}</b>
-        <small>${S.docBusy ? 'Examinando de novo…' : `Verificado às ${new Date(d.at || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}. Cada item tem o botão que resolve.`}</small></div>
-        <span class="spacer"></span>
-        <button class="btn small ghost" id="docAgain" ${S.docBusy ? 'disabled' : ''}>${SVG.refresh}Verificar de novo</button>
-        ${fixable.length > 1 ? `<button class="btn small primary" id="docAll">${SVG.wrench}Resolver tudo (${fixable.length})</button>` : ''}</div>
-      ${bad.length ? `<ul class="doc-list">${items}</ul>` : ''}
-      <details class="doc-good"><summary>${good.length} ${good.length === 1 ? 'item em ordem' : 'itens em ordem'}</summary><ul class="doc-list">${good.map((c) => `<li class="doc-item ok">${levelIcon('ok')}<div class="doc-txt"><b>${esc(c.title)}</b></div></li>`).join('')}</ul></details>
-      <div class="doc-foot"><button class="btn small ghost" id="docReport">${SVG.doc}Gerar relatório para o suporte</button><span class="fine">Junta num .zip o que o suporte precisa (sem senhas e sem o seu nome de usuário) e salva na área de trabalho.</span></div>
-    </div>`;
-    box.querySelector('#docAgain').onclick = () => diagnose();
-    box.querySelector('#docReport').onclick = () => makeReport();
+    const when = S.docBusy ? 'conferindo de novo…' : `conferido às ${new Date(d.at || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    const again = `<button class="btn small ghost icon" id="docAgain" title="Conferir de novo" ${S.docBusy ? 'disabled' : ''}>${S.docBusy ? '<span class="spin" style="width:14px;height:14px"></span>' : SVG.refresh}</button>`;
+    const goodList = `<details class="doc-good"><summary>${good.length} ${good.length === 1 ? 'item em ordem' : 'itens em ordem'}</summary><ul class="doc-list">${good.map((c) => `<li class="doc-item ok">${levelIcon('ok')}<div class="doc-txt"><b>${esc(c.title)}</b></div></li>`).join('')}</ul></details>`;
+    if (!bad.length) {
+      box.innerHTML = `<div class="doc slim all-ok">${levelIcon('ok')}<b>Tudo certo com o PC e as VMs</b><small>${when}</small><span class="spacer"></span>${again}</div>
+        <div class="doc-okwrap">${goodList}</div>`;
+    } else {
+      const worst = bad.some((c) => c.level === 'fail') ? 'fail' : 'warn';
+      const items = bad.map((c, i) => `<li class="doc-item ${c.level}">${levelIcon(c.level)}<div class="doc-txt"><b>${esc(c.title)}</b>${c.text ? `<p>${c.text}</p>` : ''}</div>
+        ${c.fix ? `<button class="btn small" data-fix="${i}">${esc(c.fix.label)}</button>` : ''}</li>`).join('');
+      box.innerHTML = `<div class="panel doc has-${worst}">
+        <div class="doc-head">${levelIcon(worst)}<div><b>${bad.length === 1 ? '1 coisa para resolver' : `${bad.length} coisas para resolver`}</b><small>${when}</small></div>
+          <span class="spacer"></span>${again}
+          ${fixable.length > 1 ? `<button class="btn small primary" id="docAll">${SVG.wrench}Resolver tudo</button>` : ''}</div>
+        <ul class="doc-list">${items}</ul>${goodList}</div>`;
+    }
+    box.querySelector('#docAgain').onclick = () => { S.docStale = true; load(false); };
     box.querySelectorAll('[data-fix]').forEach((b) => (b.onclick = () => doFix(bad[+b.dataset.fix])));
     const all = box.querySelector('#docAll');
     if (all) all.onclick = () => doFixAll(fixable);
@@ -286,74 +298,93 @@ const VMUI = (() => {
         <div class="vm-row"><button class="btn primary" id="vmHv">Ativar o Hyper-V</button></div></div>`;
     }
     const share = r.gpus.filter((g) => g.shareable);
-    const host = `<div class="panel">
-      <div class="vm-row" style="margin:0 0 6px;align-items:center"><h2 style="margin:0">Este PC</h2><span class="spacer"></span>
-        <button class="btn primary small" id="vmNew">${SVG.plus}Criar uma VM do zero</button></div>
-      <dl class="kv">
-        <dt>Windows</dt><dd>${esc(r.edition || '—')}${r.build ? ` (build ${esc(r.build)})` : ''}</dd>
-        <dt>Processador</dt><dd>${esc(r.threads || '—')} núcleos lógicos</dd>
-        <dt>Memória</dt><dd>${gb(r.ram)}</dd>
-        <dt>Placas para a VM</dt><dd>${share.length ? share.map((g) => esc(g.name) + (g.integrated ? ' <span style="color:var(--dim)">(vídeo integrado)</span>' : '')).join('<br>') : 'Nenhuma'}</dd>
-      </dl></div>`;
+    const pcLine = [r.edition, r.threads ? `${r.threads} núcleos` : '', r.ram ? gb(r.ram) : '', share.map((g) => g.name).join(' + ')].filter(Boolean).map(esc).join(' · ');
+    const tips = `<details class="vm-tips"><summary>${SVG.info}Bom saber</summary><ul class="steps">
+      <li>Quando o driver da placa muda no PC, o Piece Helper atualiza a VM sozinho ao abrir (se ela estiver desligada) ou avisa aqui com o botão que resolve.</li>
+      <li>Deu problema? Use <b>Consertar a VM</b> no menu ⋯ (não apaga nada). Se não resolver, <b>Refazer a VM do zero</b> cria de novo com as mesmas configurações.</li>
+      <li>O ideal é o mesmo Windows no PC e na VM (10 com 10, 11 com 11).</li>
+      <li>Com a placa na VM, não dá para criar pontos de verificação dela. Para um backup: tire a placa, crie o ponto e coloque a placa de novo.</li>
+      <li>A placa é compartilhada: o PC continua usando ela normalmente. Nada é gravado na placa e dá para desfazer tudo.</li>
+      <li>Alguns jogos com anti-cheat não abrem dentro de máquinas virtuais. O Piece Helper não tenta esconder a VM.</li></ul></details>`;
     if (r.vmerror && r.vmerror !== 'admin') h += callout('warn', 'O Hyper-V respondeu com erro', esc(r.vmerror)) + '<div style="height:14px"></div>';
     if (!r.vms.length) {
-      return h + host + `<div class="panel vm-sec"><h2>Nenhuma máquina virtual ainda</h2>
-        <p class="fine" style="margin:0">O Piece Helper cria uma com um clique: baixa o Windows da Microsoft, instala sozinho (sem senha e sem conta da Microsoft), deixa o Windows leve, coloca a placa de vídeo e, se quiser, a Steam com o Grand Chase já copiado.</p>
-        <div class="vm-row"><button class="btn primary" id="vmNew2">${SVG.plus}Criar uma VM do zero</button><button class="btn ghost" id="vmMgr">Prefiro fazer pelo Gerenciador do Hyper-V</button></div></div>`;
+      return h + `<div class="vm-empty"><div class="ve-ico">${SVG.screen}</div><h2>Nenhuma máquina virtual ainda</h2>
+        <p>O Piece Helper cria uma com um clique: baixa o Windows da Microsoft, instala sozinho (sem senha e sem conta da Microsoft), deixa o Windows leve, coloca a placa de vídeo e, se quiser, a Steam com o Grand Chase já copiado.</p>
+        <button class="btn primary" id="vmNew">${SVG.plus}Criar uma VM</button>
+        <button class="linkbtn" id="vmMgr">ou fazer pelo Gerenciador do Hyper-V</button>
+        <div class="ve-pc">Este PC: ${pcLine}</div></div><div id="vmDoctor"></div>${tips}`;
     }
     const v = current(r); S.sel = v.name;
     const running = v.state === 'Running';
     const hostDrv = (r.gpus.find((g) => g.id === v.gpu_id) || {}).driver;
-    const drv = { ok: `Em dia (${esc(v.driver_copied || hostDrv || '')})`, outdated: `Desatualizados (VM ${esc(v.driver_copied)}, PC ${esc(hostDrv)})`, unknown: 'Não sei: a placa foi colocada fora do Piece Helper' }[v.drivers] || '—';
-    const vmPanel = `<div class="panel">
-      <div class="vm-row" style="margin:0 0 6px;align-items:center"><div class="vm-name"><h2>${esc(v.name)}</h2><span class="state-tag ${running ? 'on' : ''}">${running ? 'Ligada' : v.state === 'Off' ? 'Desligada' : esc(v.state)}</span></div><span class="spacer"></span>
-        ${r.vms.length > 1 ? `<div class="field" style="margin:0"><select id="vmSel">${r.vms.map((x) => `<option ${x.name === v.name ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>` : ''}</div>
-      <dl class="kv">
-        <dt>Processadores</dt><dd>${esc(v.cpus)}</dd>
-        <dt>Memória</dt><dd>${gb(v.ram)} ${v.dyn ? '(dinâmica)' : '(fixa)'}</dd>
-        <dt>Placa de vídeo</dt><dd>${v.gpu ? esc(v.gpu_name || 'Sim') : 'Não'}</dd>
-        ${v.gpu ? `<dt>Drivers na VM</dt><dd>${drv}</dd>` : ''}
-      </dl>
-      <div class="vm-row">
-        ${running ? `<button class="btn primary" id="vmOpen">${SVG.screen}Abrir a janela da VM</button><button class="btn ghost" id="vmRes">Resolução da janela</button><button class="btn ghost" id="vmOff">${SVG.stop}Desligar</button>`
-    : `<button class="btn primary" id="vmOn">${SVG.play}Ligar e abrir</button>`}
-        <span class="spacer"></span><button class="btn ghost small" id="vmHelper">Instalar o Piece Helper na VM</button><button class="btn ghost small" id="vmMgr">Gerenciador do Hyper-V</button></div>
-      <div class="vm-row maint"><span class="fine" style="margin:0">Manutenção:</span>
-        <button class="btn small" id="vmRepair">${SVG.wrench}Consertar a VM</button>
-        <button class="btn small" id="vmGame">${SVG.refresh}Atualizar o GC da VM</button>
-        <span class="spacer"></span><button class="btn small danger" id="vmRecreate">Refazer a VM do zero</button></div></div>`;
-
-    let gpu;
+    const drvChip = !v.gpu ? '' : v.drivers === 'ok' ? `<span class="vchip ok" title="Drivers da placa iguais aos do PC (${esc(v.driver_copied || hostDrv || '')})">${SVG.ok}Drivers em dia</span>`
+      : v.drivers === 'outdated' ? `<span class="vchip warn" title="VM ${esc(v.driver_copied)} · PC ${esc(hostDrv)}">${SVG.warn}Drivers desatualizados</span>`
+        : `<span class="vchip" title="A placa foi colocada fora do Piece Helper. Use 'Atualizar drivers da VM' uma vez.">Drivers: ?</span>`;
+    const tabs = r.vms.length > 1 ? `<div class="vm-tabs" role="tablist">${r.vms.map((x) => `<button role="tab" data-vmsel="${esc(x.name)}" aria-selected="${x.name === v.name}"><i class="${x.state === 'Running' ? 'on' : ''}"></i>${esc(x.name)}</button>`).join('')}</div>` : '';
+    let extra = '';
     if (!v.gpu) {
-      gpu = !share.length ? callout('warn', 'Nenhuma placa deste PC pode ser compartilhada', 'O Windows não liberou nenhuma placa para máquinas virtuais. Atualize o driver da placa pelo site do fabricante e tente de novo.')
-        : `<div class="panel"><p class="fine" style="margin:0">O Piece Helper desliga a VM, copia os drivers da placa para dentro dela, ajusta o que a VM precisa e liga a placa. Os jogos dentro da VM passam a usar a placa de vídeo de verdade.</p>
-          <div class="vm-row"><div class="field" style="margin:0;min-width:280px"><label>Placa de vídeo</label><select id="vmGpu">${share.map((g) => `<option value="${esc(g.id)}" ${g.id === r.default_gpu ? 'selected' : ''}>${esc(g.name)}${g.integrated ? ' (vídeo integrado)' : ''}</option>`).join('')}</select></div>
-          <span class="spacer"></span><button class="btn primary" id="vmGpuGo">${SVG.bolt}Colocar a placa na VM</button></div></div>`;
-    } else {
-      const st = v.drivers === 'outdated' ? callout('warn', 'Os drivers da placa na VM estão desatualizados', 'Você atualizou o driver da placa no PC, mas a VM ainda está com a versão antiga. Atualize para a VM não dar erro ou tela preta.')
-        : v.drivers === 'unknown' ? callout('info', 'A placa foi colocada fora do Piece Helper', 'Clique em "Atualizar drivers da VM" uma vez. Assim o app guarda a versão e passa a avisar quando precisar de novo.')
-          : callout('ok', 'Tudo certo', `A VM está usando a ${esc(v.gpu_name || 'placa de vídeo')} com os drivers em dia.`);
-      const mism = v.guest_build && r.build && ((+r.build >= 22000) !== (+v.guest_build >= 22000))
-        ? `<div style="margin-top:10px">${callout('info', `Seu PC está no Windows ${+r.build >= 22000 ? '11' : '10'} e a VM no Windows ${+v.guest_build >= 22000 ? '11' : '10'}`, 'Costuma funcionar. Se a VM der tela azul ou ficar instável, use o mesmo Windows nos dois.')}</div>` : '';
-      gpu = st + mism + `<div class="vm-row"><button class="btn ${v.drivers !== 'ok' ? 'primary' : 'ghost'}" id="vmGpuUpd">${SVG.refresh}Atualizar drivers da VM</button><span class="spacer"></span><button class="btn ghost" id="vmGpuRm">Tirar a placa da VM</button></div>`;
+      extra = !share.length ? callout('warn', 'Nenhuma placa deste PC pode ser compartilhada', 'O Windows não liberou nenhuma placa para máquinas virtuais. Atualize o driver da placa pelo site do fabricante e tente de novo.')
+        : `<div class="vh-gpu"><div><b>Esta VM está sem placa de vídeo</b><small>Com a placa, os jogos dentro da VM rodam de verdade. Leva de 1 a 5 minutos.</small></div><span class="spacer"></span>
+            ${share.length > 1 ? `<div class="field" style="margin:0"><select id="vmGpu">${share.map((g) => `<option value="${esc(g.id)}" ${g.id === r.default_gpu ? 'selected' : ''}>${esc(g.name)}${g.integrated ? ' (vídeo integrado)' : ''}</option>`).join('')}</select></div>` : `<input type="hidden" id="vmGpu" value="${esc(share[0].id)}">`}
+            <button class="btn primary small" id="vmGpuGo">${SVG.bolt}Colocar a placa</button></div>`;
     }
+    if (v.guest_build && r.build && ((+r.build >= 22000) !== (+v.guest_build >= 22000))) {
+      extra += `<p class="vh-note">${SVG.info}Seu PC está no Windows ${+r.build >= 22000 ? '11' : '10'} e a VM no Windows ${+v.guest_build >= 22000 ? '11' : '10'}. Costuma funcionar; se a VM ficar instável, use o mesmo Windows nos dois.</p>`;
+    }
+    const hero = `<div class="vm-hero ${running ? 'is-on' : ''}">
+      <div class="vh-top">
+        <div class="vh-ico">${SVG.screen}<i></i></div>
+        <div class="vh-main">
+          <div class="vh-title"><h2>${esc(v.name)}</h2><span class="state-tag ${running ? 'on' : ''}">${running ? 'Ligada' : v.state === 'Off' ? 'Desligada' : esc(v.state)}</span></div>
+          <div class="vh-specs"><span>${SVG.cpu}${esc(v.cpus)} núcleos</span><span>${SVG.ram}${gb(v.ram)}${v.dyn ? ' dinâmica' : ''}</span><span>${SVG.gpu}${v.gpu ? esc(v.gpu_name || 'Placa de vídeo') : 'Sem placa'}</span>${drvChip}</div>
+        </div>
+        <div class="vh-acts">
+          ${running ? `<button class="btn ghost" id="vmOff">${SVG.stop}Desligar</button><button class="btn primary" id="vmOpen">${SVG.screen}Abrir janela</button>`
+    : `<button class="btn primary" id="vmOn">${SVG.play}Ligar e abrir</button>`}
+          <button class="btn icon more" id="vmMore" title="Mais opções" aria-haspopup="menu">${SVG.dots}</button>
+        </div>
+      </div>${extra ? `<div class="vh-extra">${extra}</div>` : ''}</div>`;
+    const foot = `<div class="vm-foot"><span class="pc-line"><b>Este PC</b>${pcLine}</span><span class="spacer"></span><button class="btn small ghost" id="vmNew">${SVG.plus}Criar outra VM</button></div>`;
+    return h + tabs + hero + '<div id="vmDoctor"></div>' + foot + tips;
+  }
+
+  /* ---------- menu ⋯ ---------- */
+  function popMenu(anchor, groups) {
+    document.getElementById('vmMenu')?.remove();
+    const m = document.createElement('div');
+    m.id = 'vmMenu'; m.className = 'menu-pop'; m.setAttribute('role', 'menu');
+    m.innerHTML = groups.filter((g) => g.items.some(Boolean)).map((g) => `<div class="mg">${g.title ? `<div class="mg-t">${esc(g.title)}</div>` : ''}${g.items.filter(Boolean).map((it, i) =>
+      `<button role="menuitem" class="mi ${it.danger ? 'danger' : ''}" data-mi="${esc(g.title || '')}:${i}">${it.icon || ''}<span><b>${esc(it.label)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</span></button>`).join('')}</div>`).join('');
+    document.body.appendChild(m);
+    const flat = {};
+    groups.forEach((g) => g.items.filter(Boolean).forEach((it, i) => (flat[`${g.title || ''}:${i}`] = it)));
+    const r = anchor.getBoundingClientRect();
+    const w = m.offsetWidth, hh = m.offsetHeight;
+    m.style.left = `${Math.max(8, Math.min(r.right - w, innerWidth - w - 8))}px`;
+    m.style.top = `${r.bottom + hh + 8 > innerHeight ? Math.max(8, r.top - hh - 6) : r.bottom + 6}px`;
+    const close = () => { m.remove(); document.removeEventListener('mousedown', out, true); document.removeEventListener('keydown', key, true); };
+    const out = (e) => { if (!m.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) close(); };
+    const key = (e) => { if (e.key === 'Escape') close(); };
+    setTimeout(() => { document.addEventListener('mousedown', out, true); document.addEventListener('keydown', key, true); });
+    m.querySelectorAll('[data-mi]').forEach((b) => (b.onclick = () => { close(); flat[b.dataset.mi].run(); }));
+    m.querySelector('.mi')?.focus();
+  }
+
+  function tuneModal(v, r) {
     const rec = r.recommend;
-    const tune = `<div class="panel"><p class="fine" style="margin:0">Recomendado para o seu PC: <b>${rec.cpus} processadores</b> e <b>${rec.ram_gb} GB</b> de memória fixa. Mais processadores deixam a VM mais rápida e memória fixa evita travadinhas.</p>
-      <div class="vm-row">
-        <div class="field" style="margin:0"><label>Processadores (até ${rec.max_cpus})</label><input type="number" id="vmCpus" min="1" max="${rec.max_cpus}" value="${rec.cpus}" style="width:150px"></div>
-        <div class="field" style="margin:0"><label>Memória em GB (até ${rec.max_ram_gb})</label><input type="number" id="vmRam" min="2" max="${rec.max_ram_gb}" value="${rec.ram_gb}" style="width:150px"></div>
-        <span class="spacer"></span>${v.tune_backup ? '<button class="btn ghost" id="vmTuneUndo">Voltar ao que era</button>' : ''}<button class="btn primary" id="vmTune">Aplicar</button></div>
-      <p class="fine">Agora: ${esc(v.cpus)} processadores e ${gb(v.ram)} de memória ${v.dyn ? 'dinâmica' : 'fixa'}.</p></div>`;
-    const notes = `<div class="panel vm-sec"><h2>Bom saber</h2><ul class="steps">
-      <li>Quando o driver da placa muda no PC, o Piece Helper atualiza a VM sozinho ao abrir (se ela estiver desligada) ou mostra o botão em "Verificar e corrigir".</li>
-      <li>Deu problema? Use "Consertar a VM" (não apaga nada). Se não resolver, "Refazer a VM do zero" cria de novo com as mesmas configurações.</li>
-      <li>O ideal é o mesmo Windows no PC e na VM (10 com 10, 11 com 11).</li>
-      <li>Com a placa na VM, não dá para criar pontos de verificação dela. Para um backup: tire a placa, crie o ponto e coloque a placa de novo.</li>
-      <li>A placa é compartilhada: o PC continua usando ela normalmente. Nada é gravado na placa e dá para desfazer tudo.</li>
-      <li>Alguns jogos com anti-cheat não abrem dentro de máquinas virtuais. O Piece Helper não tenta esconder a VM.</li></ul></div>`;
-    return h + `<div class="vm-grid">${host}${vmPanel}</div>` +
-      `<div class="vm-sec"><h2>Placa de vídeo na VM</h2>${gpu}</div>` +
-      `<div class="vm-sec"><h2>Processador e memória</h2>${tune}</div>` + notes;
+    const m = wmodal(`<h3>Processador e memória da VM ${esc(v.name)}</h3>
+      <p class="fine" style="margin:-6px 0 16px">Agora: <b>${esc(v.cpus)} núcleos</b> e <b>${gb(v.ram)}</b> de memória ${v.dyn ? 'dinâmica' : 'fixa'}. Recomendado para o seu PC: <b>${rec.cpus} núcleos</b> e <b>${rec.ram_gb} GB</b> fixos (memória fixa evita travadinhas).</p>
+      <div class="f2"><div class="field"><label>Núcleos (até ${rec.max_cpus})</label><input type="number" id="tnCpus" min="1" max="${rec.max_cpus}" value="${rec.cpus}"></div>
+        <div class="field"><label>Memória em GB (até ${rec.max_ram_gb})</label><input type="number" id="tnRam" min="2" max="${rec.max_ram_gb}" value="${rec.ram_gb}"></div></div>
+      ${v.state !== 'Off' ? '<div class="hint">A VM desliga, recebe o ajuste e liga de novo. Salve o que estiver aberto nela.</div>' : ''}
+      <div class="modal-actions" style="margin-top:12px">${v.tune_backup ? '<button class="btn ghost" id="tnUndo">Voltar ao que era</button><span class="spacer" style="flex:1"></span>' : ''}<button class="btn ghost" data-close>Cancelar</button><button class="btn primary" id="tnGo">Aplicar</button></div>`);
+    m.el.querySelector('#tnGo').onclick = () => {
+      const c = +m.el.querySelector('#tnCpus').value, g = +m.el.querySelector('#tnRam').value;
+      if (!c || !g) return toast('Preencha os dois números.', 'warn');
+      m.close(); run(V.tune(v.name, c, g), 'Ajustar a VM');
+    };
+    const u = m.el.querySelector('#tnUndo');
+    if (u) u.onclick = () => { m.close(); run(V.tuneUndo(v.name), 'Voltar a VM ao original'); };
   }
 
   function bind(r) {
@@ -365,42 +396,43 @@ const VMUI = (() => {
       if (await ask('Ativar o Hyper-V?', '<p>Leva alguns minutos e depois você precisa reiniciar o PC. Com o Hyper-V ligado, outros programas de máquina virtual (VMware, VirtualBox) podem ficar mais lentos.</p>', 'Ativar')) run(V.hypervEnable(), 'Ativar o Hyper-V');
     });
     on('vmNew', () => wizard(r));
-    on('vmNew2', () => wizard(r));
     const v = r.vms.length ? current(r) : null;
     if (!v) return;
-    const sel = document.getElementById('vmSel');
-    if (sel) sel.onchange = () => { S.sel = sel.value; $('#vmBody').innerHTML = render(r); bind(r); };
+    document.querySelectorAll('[data-vmsel]').forEach((b) => (b.onclick = () => { S.sel = b.dataset.vmsel; load(false); }));
+    const A = {
+      helper: async () => { if (await ask('Instalar o Piece Helper na VM?', `<p>A VM <b>${esc(v.name)}</b> vai ser desligada (salve o que estiver aberto nela), o Piece Helper deste PC é copiado para dentro dela, com atalho na área de trabalho, e a VM liga de novo. Se já tiver um lá, ele é atualizado para esta versão.</p><p>Dentro da VM, as contas da Steam são as que você logar lá.</p>`, 'Instalar')) run(V.installHelper(v.name), 'Piece Helper na VM'); },
+      res: async () => { if (await ask('Resolução da janela da VM', '<p>Feche a janela da VM que estiver aberta (isso não desliga a VM). Na janelinha que vai abrir, arraste o controle até a resolução que quiser (ex.: <b>1280 x 720</b>), marque <b>Salvar minhas configurações</b> e clique em <b>Conectar</b>.</p>', 'Abrir')) V.open(v.name, true); },
+      gpuUpd: async () => { if (await ask('Atualizar os drivers da VM?', '<p>A VM vai ser desligada (salve o que estiver aberto nela) e os drivers atuais da placa são copiados de novo para dentro dela.</p>', 'Atualizar')) run(V.gpuUpdate(v.name), 'Atualizar drivers da VM'); },
+      gpuRm: async () => { if (await ask('Tirar a placa da VM?', '<p>A VM vai ser desligada e volta a funcionar sem a placa de vídeo, como era antes. Os pontos de verificação voltam a ser como estavam.</p>', 'Tirar a placa')) run(V.gpuRemove(v.name), 'Tirar a placa da VM'); },
+      repair: async () => { if (await ask('Consertar a VM?', `<p>Sem apagar nada da VM <b>${esc(v.name)}</b>, o Piece Helper: confere as configurações, liga as ferramentas da VM, coloca a placa de vídeo de novo, copia os drivers atuais, religa a internet, reaplica a correção da Steam (erro LoadLibrary) e atualiza o Piece Helper dentro dela.</p><p>A VM é desligada durante o conserto: salve o que estiver aberto nela.</p>`, 'Consertar')) run(V.repair(v.name), `Consertar a VM ${v.name}`); },
+      game: async () => { if (await ask('Atualizar o Grand Chase da VM?', `<p>Copia a versão do Grand Chase deste PC para a VM <b>${esc(v.name)}</b> (só os arquivos que mudaram), sem baixar de novo pela Steam dela. Feche o jogo no PC antes. A VM é desligada durante a cópia.</p>`, 'Atualizar')) run(V.gameSync(v.name), `Atualizar o GC da VM ${v.name}`); },
+      recreate: async () => { if (await ask(`Refazer a VM ${esc(v.name)} do zero?`, `<p><b>Apaga a VM ${esc(v.name)} e tudo o que tem dentro dela</b> (o login da Steam e o que você instalou lá) e cria de novo com as mesmas configurações: Windows, processador, memória, placa, Steam e Grand Chase.</p><p>Use quando "Consertar a VM" não resolver. O Windows já baixado é reaproveitado.</p>`, 'Apagar e refazer')) run(V.recreate(v.name), `Refazer a VM ${v.name}`); },
+    };
     on('vmOpen', () => V.open(v.name, false));
-    on('vmHelper', async () => {
-      if (await ask('Instalar o Piece Helper na VM?', `<p>A VM <b>${esc(v.name)}</b> vai ser desligada (salve o que estiver aberto nela), o Piece Helper deste PC é copiado para dentro dela, com atalho na área de trabalho, e a VM liga de novo. Se já tiver um lá, ele é atualizado para esta versão.</p><p>Dentro da VM, as contas da Steam são as que você logar lá.</p>`, 'Instalar')) run(V.installHelper(v.name), 'Piece Helper na VM');
-    });
-    on('vmRes', async () => {
-      if (await ask('Resolução da janela da VM', '<p>Feche a janela da VM que estiver aberta (isso não desliga a VM). Na janelinha que vai abrir, arraste o controle até a resolução que quiser (ex.: <b>1280 x 720</b>), marque <b>Salvar minhas configurações</b> e clique em <b>Conectar</b>.</p>', 'Abrir')) V.open(v.name, true);
-    });
     on('vmOn', () => run(V.power(v.name, true), 'Ligar a VM', () => V.open(v.name, false)));
     on('vmOff', async () => { if (await ask('Desligar a VM?', '<p>O Windows da VM vai desligar normalmente. Salve o que estiver aberto nela.</p>', 'Desligar')) run(V.power(v.name, false), 'Desligar a VM'); });
     on('vmGpuGo', async () => {
       const id = document.getElementById('vmGpu').value, g = r.gpus.find((x) => x.id === id);
-      if (await ask(`Colocar a ${esc(g ? g.name : 'placa')} na VM?`, '<p>A VM vai ser desligada: salve o que estiver aberto nela. Os drivers da placa são copiados para dentro da VM e os pontos de verificação dela são desligados, porque VMs com placa de vídeo não aceitam. Leva de 1 a 5 minutos. Para desfazer, use "Tirar a placa da VM".</p>', 'Colocar a placa')) run(V.gpuSetup(v.name, id), 'Placa de vídeo na VM');
+      if (await ask(`Colocar a ${esc(g ? g.name : 'placa')} na VM?`, '<p>A VM vai ser desligada: salve o que estiver aberto nela. Os drivers da placa são copiados para dentro da VM e os pontos de verificação dela são desligados, porque VMs com placa de vídeo não aceitam. Leva de 1 a 5 minutos. Para desfazer, use "Tirar a placa da VM" no menu ⋯.</p>', 'Colocar a placa')) run(V.gpuSetup(v.name, id), 'Placa de vídeo na VM');
     });
-    on('vmGpuUpd', async () => { if (await ask('Atualizar os drivers da VM?', '<p>A VM vai ser desligada (salve o que estiver aberto nela) e os drivers atuais da placa são copiados de novo para dentro dela.</p>', 'Atualizar')) run(V.gpuUpdate(v.name), 'Atualizar drivers da VM'); });
-    on('vmGpuRm', async () => { if (await ask('Tirar a placa da VM?', '<p>A VM vai ser desligada e volta a funcionar sem a placa de vídeo, como era antes. Os pontos de verificação voltam a ser como estavam.</p>', 'Tirar a placa')) run(V.gpuRemove(v.name), 'Tirar a placa da VM'); });
-    on('vmTune', async () => {
-      const c = +document.getElementById('vmCpus').value, m = +document.getElementById('vmRam').value;
-      if (!c || !m) return toast('Preencha os dois números.', 'warn');
-      if (v.state !== 'Off' && !(await ask('A VM vai reiniciar', '<p>Para mudar processador e memória, a VM precisa desligar. O Piece Helper desliga, aplica e liga de novo. Salve o que estiver aberto nela.</p>', 'Aplicar'))) return;
-      run(V.tune(v.name, c, m), 'Ajustar a VM');
-    });
-    on('vmTuneUndo', () => run(V.tuneUndo(v.name), 'Voltar a VM ao original'));
-    on('vmRepair', async () => {
-      if (await ask('Consertar a VM?', `<p>Sem apagar nada da VM <b>${esc(v.name)}</b>, o Piece Helper: confere as configurações, coloca a placa de vídeo de novo, copia os drivers atuais, religa a internet, reaplica a correção da Steam (erro LoadLibrary) e atualiza o Piece Helper dentro dela.</p><p>A VM é desligada durante o conserto: salve o que estiver aberto nela.</p>`, 'Consertar')) run(V.repair(v.name), `Consertar a VM ${v.name}`);
-    });
-    on('vmGame', async () => {
-      if (await ask('Atualizar o Grand Chase da VM?', `<p>Copia a versão do Grand Chase deste PC para a VM <b>${esc(v.name)}</b> (só os arquivos que mudaram), sem baixar de novo pela Steam dela. Feche o jogo no PC antes. A VM é desligada durante a cópia.</p>`, 'Atualizar')) run(V.gameSync(v.name), `Atualizar o GC da VM ${v.name}`);
-    });
-    on('vmRecreate', async () => {
-      if (await ask(`Refazer a VM ${esc(v.name)} do zero?`, `<p><b>Apaga a VM ${esc(v.name)} e tudo o que tem dentro dela</b> (o login da Steam e o que você instalou lá) e cria de novo com as mesmas configurações: Windows, processador, memória, placa, Steam e Grand Chase.</p><p>Use quando "Consertar a VM" não resolver. O Windows já baixado é reaproveitado.</p>`, 'Apagar e refazer')) run(V.recreate(v.name), `Refazer a VM ${v.name}`);
-    });
+    on('vmMore', (e) => popMenu(e.currentTarget, [
+      { title: '', items: [
+        v.state === 'Running' && { icon: SVG.resize, label: 'Resolução da janela', sub: 'Escolher o tamanho da tela da VM', run: A.res },
+        { icon: SVG.sliders, label: 'Processador e memória', sub: `Agora: ${v.cpus} núcleos · ${gb(v.ram)}`, run: () => tuneModal(v, r) },
+      ] },
+      { title: 'Manutenção', items: [
+        { icon: SVG.wrench, label: 'Consertar a VM', sub: 'Confere e arruma tudo, sem apagar nada', run: A.repair },
+        { icon: SVG.refresh, label: 'Atualizar o Grand Chase da VM', sub: 'Copia do PC só o que mudou', run: A.game },
+        v.gpu && { icon: SVG.gpu, label: 'Atualizar drivers da VM', sub: 'Copia de novo os drivers da placa', run: A.gpuUpd },
+        { icon: SVG.box, label: 'Instalar o Piece Helper na VM', sub: 'Para trocar de conta lá dentro', run: A.helper },
+      ] },
+      { title: 'Mais', items: [
+        { icon: SVG.doc, label: 'Gerar relatório para o suporte', sub: 'Um .zip na área de trabalho, sem senhas', run: () => makeReport() },
+        { icon: SVG.ext, label: 'Gerenciador do Hyper-V', run: () => V.manager() },
+        v.gpu && { icon: SVG.x, label: 'Tirar a placa da VM', run: A.gpuRm },
+        { icon: SVG.trash, label: 'Refazer a VM do zero', sub: 'Apaga e cria de novo igual', danger: true, run: A.recreate },
+      ] },
+    ]));
   }
 
   /* ---------- criar uma VM do zero ---------- */
@@ -484,7 +516,6 @@ const VMUI = (() => {
     };
   }
 
-  $('#vmRefresh').onclick = () => load(true);
   // ao abrir o app: confere sozinho. Drivers da VM desatualizados com a VM desligada são atualizados na hora;
   // o resto aparece no menu (ponto amarelo) e na tela de Máquina virtual com o botão que resolve.
   setTimeout(async () => {
