@@ -151,10 +151,10 @@ function renderGrid() {
       presenceTag(a),
     ].join('');
     const used = m.lastUsed || a.lastLogin;
-    const line2 = [esc(sub), a.current ? '<b class="cur-txt">em uso agora</b>' : (used ? 'usada ' + ago(used) : '')].filter(Boolean).join(' · ');
+    const line2 = [esc(sub), a.current ? '' : (used ? 'usada ' + ago(used) : '')].filter(Boolean).join(' · ');
     card.title = m.note || '';
     const goBtn = a.current && !(isSteam && gameOn)
-      ? `<button class="btn small go is-cur" title="Esta conta já está logada">${ICON.check || ''}Em uso</button>`
+      ? `<span class="go is-cur" title="Esta conta já está logada na Steam"><i class="cur-dot"></i>Em uso</span>`
       : isSteam && gameOn
         ? `<button class="btn gold small go">${ICON.play}Jogar</button>`
         : `<button class="btn primary small go">${ICON.swap}Trocar</button>`;
