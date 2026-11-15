@@ -521,3 +521,15 @@ h1 { margin: 4px 0 0; display: flex; align-items: center; gap: 12px; font-size: 
 .drv-check { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line2); display: grid; place-items: center; color: transparent; }
 .drv.on .drv-check { background: var(--em); border-color: transparent; color: #04281c; }
 .drv-check svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 3; }
+
+/* Trocar x Em uso (1.1.6): um é botão, o outro é só um selo de status */
+.card .card-actions .btn.primary { background: var(--panel2); color: var(--text); border: 1px solid var(--line2); box-shadow: none; }
+.card .card-actions .btn.primary svg { color: var(--muted); }
+.card:hover .card-actions .btn.primary { background: var(--panel2); color: var(--text); border-color: rgba(52, 211, 153, .5); box-shadow: none; }
+.card .card-actions .btn.primary:hover, .card .card-actions .btn.primary:focus-visible { background: linear-gradient(180deg, var(--em2), var(--em)); color: #04281c; border-color: transparent; box-shadow: 0 6px 16px rgba(16, 185, 129, .3); }
+.card .card-actions .btn.primary:hover svg, .card .card-actions .btn.primary:focus-visible svg { color: #04281c; }
+.card .card-actions .is-cur { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 10px; border-radius: 99px; font-size: 12px; font-weight: 800;
+  letter-spacing: .4px; text-transform: uppercase; color: #04281c; background: linear-gradient(180deg, var(--em2), var(--em)); box-shadow: 0 0 0 3px rgba(16, 185, 129, .15); cursor: default; user-select: none; }
+.card .cur-dot { width: 7px; height: 7px; border-radius: 50%; background: #04281c; animation: curpulse 1.8s ease-in-out infinite; }
+@keyframes curpulse { 50% { opacity: .35; } }
+.card.current { background: linear-gradient(90deg, rgba(16, 185, 129, .10), transparent 55%), linear-gradient(180deg, var(--panel2), var(--panel)); }
