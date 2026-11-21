@@ -11,7 +11,13 @@ const Discord = require('./core/discord');
 const Updater = require('./core/updater');
 
 app.setAppUserModelId('guild.piece.helper');
-if (!app.requestSingleInstanceLock()) { app.quit(); }
+if (!app.requestSingleInstanceLock()) {
+  // já tem um Piece Helper aberto (ex.: na bandeja): este só avisa o outro e fecha.
+  // Antes, apaga a marca de "abrindo" que o loader deixou; sem isso, a próxima abertura achava que esta
+  // versão tinha travado ao abrir e voltava para a versão antiga (e pedia para atualizar de novo).
+  try { if (global.__pieceBoot) global.__pieceBoot.ok(); } catch { /* */ }
+  app.quit();
+}
 
 const ASSETS = path.join(__dirname, '..', 'assets');
 const DATA = app.getPath('userData');
@@ -136,6 +142,16 @@ function createWindow() {
     // voltou de um reinício pedido pelo "Verificar e corrigir": abre a máquina virtual e examina de novo
     if (cont) { Doctor.clearContinue(); setTimeout(() => win.webContents.send('app:continue', {}), 800); }
     try { if (global.__pieceBoot) global.__pieceBoot.ok(); } catch { /* a versão abriu: está boa */ }
+    // a versão que está rodando abriu bem: tira ela (e as anteriores) da lista de "ruins", se estiver lá
+    try {
+      const b = global.__pieceBoot;
+      if (b && b.versionsDir) {
+        const ofs = require('original-fs'), f = path.join(b.versionsDir, 'ruins.json');
+        const bad = JSON.parse(ofs.readFileSync(f, 'utf8'));
+        const limpo = bad.filter((v) => v !== app.getVersion());
+        if (limpo.length !== bad.length) ofs.writeFileSync(f, JSON.stringify(limpo));
+      }
+    } catch { /* sem lista */ }
     if (process.argv.includes('--atualizado')) setTimeout(() => win.webContents.send('update:done', { version: app.getVersion() }), 700);
   });
   win.on('close', (e) => {
